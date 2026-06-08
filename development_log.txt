@@ -1,0 +1,6 @@
+2026-06-08
+- AI_Panoramic_Radiograph_Reader 프로젝트 초기화 및 통합 UI 개발.
+- Caries_Detection_from_Panoramic 및 Pano_BoneLoss_Measurement 레포지토리를 Git Submodule로 연동하여 의존성 통합 (Monorepo-like 셋업).
+- Pano_BoneLoss_Measurement의 Python 패키지화 지원을 위해 pyproject.toml 및 __init__.py 등 패키징 작업 완료. 단독 실행 가능하도록 Dockerfile 작성.
+- 통합 UI(app.py)에서 두 모듈의 모델 객체를 로드하고, Streamlit 탭 형태로 분리/통합하여 사용자의 편의성 증대.
+- requirements.txt 및 최상위 Dockerfile을 통해, 한 번의 빌드로 두 모델 환경을 모두 구성할 수 있도록 최적화.

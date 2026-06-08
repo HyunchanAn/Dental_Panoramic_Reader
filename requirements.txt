@@ -1,0 +1,5 @@
+streamlit
+opencv-python-headless
+# Install submodules locally
+-e ./modules/caries_detection
+-e ./modules/bone_loss

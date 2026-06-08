@@ -1,0 +1,12 @@
+# Train/Val data paths (Refined)
+path: C:/Users/chema/Github/Caries_Detection_from_Panoramic/data/refined
+train: train/images
+val: val/images
+test:  # optional
+
+# Classes
+names:
+  0: Impacted
+  1: Caries
+  2: Periapical Lesion
+  3: Deep Caries

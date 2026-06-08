@@ -1,0 +1,15 @@
+Scanning c:\Users\chema\Github\Caries_Detection_from_Panoramic\data\Dental_dataset\Pediatric dental disease detection dataset...
+Unique Labels Found:
+龋病: 314
+深窝沟: 35
+根尖周炎: 34
+牙髓炎: 29
+牙齿发育异常: 24
+其他: 12
+--------------------
+Scanning c:\Users\chema\Github\Caries_Detection_from_Panoramic\data\Dental_dataset\Childrens dental caries segmentation dataset...
+Unique Labels Found:
+--------------------
+Scanning c:\Users\chema\Github\Caries_Detection_from_Panoramic\data\raw\childrens-dental-panoramic-x-ray-dataset...
+Unique Labels Found:
+--------------------
