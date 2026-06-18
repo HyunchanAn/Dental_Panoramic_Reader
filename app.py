@@ -41,72 +41,57 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(BASE_DIR, "modules", "caries_detection", "src"))
 sys.path.insert(0, os.path.join(BASE_DIR, "modules", "bone_loss"))
 
-# Import submodules
+# Import registry and wrappers
 try:
-    from dentex_caries import CariesDetector
-    from models.detector import ToothDetector
-    from models.landmark import PerioLandmarkPredictor
-    from utils.geometry import calculate_rbl
-    from services.staging import determine_patient_stage
-    from utils.calibration import CalibrationManager
+    from modules.registry import PredictorRegistry
+    from modules.caries_predictor import CariesPredictorWrapper
+    from modules.boneloss_predictor import BoneLossPredictorWrapper
 except ImportError as e:
-    st.error(f"모듈 로드 에러: 필수 의존성이 설치되었는지 확인하세요. {e}")
+    st.error(f"모듈 로드 에러: {e}")
     st.stop()
 
 @st.cache_resource
-def load_caries_detector(path):
-    if not os.path.exists(path):
+def load_registry(model_path_c):
+    registry = PredictorRegistry()
+    
+    # Load Caries Wrapper
+    c_path = model_path_c
+    if not os.path.exists(c_path):
         try: 
-            path = hf_hub_download(repo_id="HyunchanAn/Caries_Detection_from_Panoramic", filename="best_refined.pt")
+            c_path = hf_hub_download(repo_id="HyunchanAn/Caries_Detection_from_Panoramic", filename="best_refined.pt")
         except Exception as e:
-            pass # fallback to local file
-    return CariesDetector(model_path=path)
-
-@st.cache_resource
-def load_boneloss_models():
+            pass # fallback
+    caries_wrapper = CariesPredictorWrapper(model_path=c_path)
+    registry.register_module("caries_detection", caries_wrapper)
+    
+    # Load Bone Loss Wrapper
     device = "cpu"
     repo_id = "chemahc94/pano-boneloss-weights"
-    
     def get_model_path(hf_name, local_path):
-        if os.path.exists(local_path):
-            return local_path
-        try:
-            return hf_hub_download(repo_id=repo_id, filename=hf_name)
-        except Exception as e:
-            # 원격에 파일이 없으면 조용히 로컬 폴백 경로를 사용함
-            return local_path
+        if os.path.exists(local_path): return local_path
+        try: return hf_hub_download(repo_id=repo_id, filename=hf_name)
+        except Exception: return local_path
 
     onnx_path = get_model_path("best.onnx", "modules/bone_loss/runs/detect/models/detector_train/weights/best.onnx")
     pt_path = get_model_path("best.pt", "modules/bone_loss/runs/detect/models/detector_train/weights/best.pt")
-    
     final_weight = onnx_path if os.path.exists(onnx_path) else pt_path
-    if not os.path.exists(final_weight):
-        st.error(f"모델 파일이 존재하지 않습니다: {final_weight}. 네트워크를 확인하세요.")
-        st.stop()
-        
-    detector = ToothDetector(weights_path=final_weight, device=device)
-    landmark = PerioLandmarkPredictor(device=device)
     
     cls_onnx = get_model_path("pano_classifier.onnx", "modules/bone_loss/models/pano_classifier.onnx")
     if os.path.exists(cls_onnx):
-        classifier = ort.InferenceSession(cls_onnx, providers=['OpenVINOExecutionProvider', 'CPUExecutionProvider'])
-        ctype = "onnx"
+        cls_path, ctype = cls_onnx, "onnx"
     else:
-        cls_pt = get_model_path("pano_classifier.pt", "modules/bone_loss/models/pano_classifier.pt")
-        if not os.path.exists(cls_pt):
-            st.error(f"분류 모델 파일이 존재하지 않습니다: {cls_pt}")
-            st.stop()
-        classifier = vision_models.mobilenet_v3_small()
-        classifier.classifier[3] = nn.Linear(classifier.classifier[3].in_features, 2)
-        classifier.load_state_dict(torch.load(cls_pt, map_location=device))
-        classifier = classifier.to(device)
-        classifier.eval()
-        ctype = "pytorch"
-    return detector, landmark, classifier, ctype, device
+        cls_path, ctype = get_model_path("pano_classifier.pt", "modules/bone_loss/models/pano_classifier.pt"), "pytorch"
+        
+    boneloss_wrapper = BoneLossPredictorWrapper(final_weight, cls_path, ctype, device)
+    registry.register_module("bone_loss_measurement", boneloss_wrapper)
+    
+    return registry
 
-caries_detector = load_caries_detector(model_path_c)
-bone_detector, bone_landmark, bone_classifier, bone_ctype, bone_device = load_boneloss_models()
-calibrator = CalibrationManager(pixels_per_mm=pixels_per_mm)
+registry = load_registry(model_path_c)
+
+if 'pixels_per_mm' in locals():
+    # Update calibration dynamically
+    registry._predictors["bone_loss_measurement"].update_pixels_per_mm(pixels_per_mm)
 
 uploaded_file = st.file_uploader("이미지 업로드 (파노라마)", type=['jpg', 'jpeg', 'png'])
 
@@ -122,57 +107,58 @@ if uploaded_file is not None:
     with tab1:
         if st.button("우식 탐지 실행"):
             with st.spinner("Caries Detection 중..."):
-                final_boxes, proc_bgr = caries_detector.predict(
-                    img_bgr, use_clahe=use_clahe_c, clahe_clip=clahe_clip_c,
-                    use_sahi=use_sahi_c, slice_size=slice_size_c, overlap_ratio=overlap_ratio_c, conf=conf_threshold_c
+                results = registry.run_pipeline(
+                    img_bgr, ["caries_detection"], 
+                    use_clahe_c=use_clahe_c, clahe_clip_c=clahe_clip_c,
+                    use_sahi_c=use_sahi_c, slice_size_c=slice_size_c, overlap_ratio_c=overlap_ratio_c, conf_c=conf_threshold_c
                 )
-                res_img = Image.fromarray(cv2.cvtColor(proc_bgr, cv2.COLOR_BGR2RGB))
-                draw = ImageDraw.Draw(res_img, "RGBA")
-                colors = {0: (0, 0, 255), 1: (0, 255, 255), 2: (255, 165, 0), 3: (128, 0, 128)}
-                for item in final_boxes:
-                    b, c, i = item["box"], item["conf"], item["cls"]
-                    col = colors.get(i, (0, 0, 0))
-                    draw.rectangle(b, outline=col, width=line_w_c)
-                    draw.text((b[0], b[1] - 15), f"{item['name']} {c:.2f}", fill=col)
-                st.image(res_img, use_container_width=True)
-                if show_xai_c:
-                    temp_img = "temp_xai.png"
-                    image.save(temp_img)
-                    viz, _ = caries_detector.explain(temp_img)
-                    if viz is not None: st.image(viz, caption="XAI Heatmap")
+                res = results.get("caries_detection", {})
+                if res.get("status") == "error":
+                    st.error(f"에러 발생: {res.get('error_message')}")
+                else:
+                    final_boxes = res.get("predictions", [])
+                    proc_bgr = res.get("processed_image_bgr", img_bgr)
+                    res_img = Image.fromarray(cv2.cvtColor(proc_bgr, cv2.COLOR_BGR2RGB))
+                    draw = ImageDraw.Draw(res_img, "RGBA")
+                    colors = {0: (0, 0, 255), 1: (0, 255, 255), 2: (255, 165, 0), 3: (128, 0, 128)}
+                    for item in final_boxes:
+                        b, c, i, label = item["bbox"], item["confidence"], item["class_id"], item["label"]
+                        col = colors.get(i, (0, 0, 0))
+                        draw.rectangle(b, outline=col, width=line_w_c)
+                        draw.text((b[0], b[1] - 15), f"{label} {c:.2f}", fill=col)
+                    st.image(res_img, use_container_width=True)
+                    if show_xai_c:
+                        temp_img = "temp_xai.png"
+                        image.save(temp_img)
+                        viz, _ = res["detector_ref"].explain(temp_img)
+                        if viz is not None: st.image(viz, caption="XAI Heatmap")
 
     with tab2:
         if st.button("치조골 판독 실행"):
             with st.spinner("Bone Loss 측정 중..."):
-                t = transforms.Compose([transforms.Resize((224, 224)), transforms.ToTensor(), transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
-                cls_input = t(image).unsqueeze(0)
-                if bone_ctype == "pytorch":
-                    _, preds = torch.max(bone_classifier(cls_input.to(bone_device)), 1)
-                    is_pano = (preds.item() == 1)
+                results = registry.run_pipeline(img_rgb, ["bone_loss_measurement"])
+                res = results.get("bone_loss_measurement", {})
+                if res.get("status") == "error":
+                    st.error(f"에러 발생: {res.get('error_message')}")
                 else:
-                    ort_outs = bone_classifier.run(None, {bone_classifier.get_inputs()[0].name: cls_input.numpy()})
-                    is_pano = (np.argmax(ort_outs[0], axis=1)[0] == 1)
-                
-                if not is_pano:
-                    st.error("OOD 필터: 파노라마 이미지가 아닙니다.")
-                else:
-                    dets = bone_detector.predict(img_rgb)
+                    metrics = res.get("metrics", [])
+                    landmarks = res.get("landmarks", [])
+                    
                     table_data = []
                     overlay = img_rgb.copy()
-                    for d in dets:
-                        t_num, b = d["tooth_number"], d["bbox"]
-                        lms = bone_landmark.predict_landmarks(img_rgb, b)
-                        m_rbl = calculate_rbl(lms["mesial_cej"], lms["mesial_crest"], lms["root_apex"])
-                        d_rbl = calculate_rbl(lms["distal_cej"], lms["distal_crest"], lms["root_apex"])
-                        max_rbl = max(m_rbl, d_rbl)
-                        m_mm = calibrator.pixel_to_mm(np.linalg.norm(np.array(lms["mesial_cej"]) - np.array(lms["mesial_crest"])))
-                        d_mm = calibrator.pixel_to_mm(np.linalg.norm(np.array(lms["distal_cej"]) - np.array(lms["distal_crest"])))
-                        table_data.append({"Tooth": t_num, "RBL %": round(max_rbl, 1), "Loss (mm)": round(max(m_mm, d_mm), 2)})
-                        
+                    
+                    for lm_data in landmarks:
+                        b = lm_data["bbox"]
                         cx, cy, w, h = int(b[0]), int(b[1]), int(b[2]), int(b[3])
                         cv2.rectangle(overlay, (cx-w//2, cy-h//2), (cx+w//2, cy+h//2), (0, 255, 0), 2)
-                        for pt, c in [(lms["mesial_cej"], (255,0,0)), (lms["distal_cej"], (255,0,0)), (lms["mesial_crest"], (0,255,255)), (lms["distal_crest"], (0,255,255)), (lms["root_apex"], (0,0,255))]:
+                        
+                        for pt, c in [(lm_data["mesial_cej"], (255,0,0)), (lm_data["distal_cej"], (255,0,0)), 
+                                      (lm_data["mesial_crest"], (0,255,255)), (lm_data["distal_crest"], (0,255,255)), 
+                                      (lm_data["root_apex"], (0,0,255))]:
                             cv2.circle(overlay, (int(pt[0]), int(pt[1])), 5, c, -1)
+
+                    for m in metrics:
+                        table_data.append({"Tooth": m["tooth_number"], "RBL %": m["rbl_percent"], "Loss (mm)": m["loss_mm"]})
                     
                     st.image(overlay, caption="Bone Loss Results")
                     st.dataframe(pd.DataFrame(table_data))
@@ -181,61 +167,70 @@ if uploaded_file is not None:
         if st.button("통합 분석 실행 (Run All)"):
             st.info("두 모델을 모두 실행하여 한 화면에 결과를 합성합니다.")
             with st.spinner("통합 분석 중..."):
-                final_boxes, proc_bgr = caries_detector.predict(img_bgr, conf=conf_threshold_c)
-                overlay = cv2.cvtColor(proc_bgr, cv2.COLOR_BGR2RGB)
+                # run pipelines
+                results_c = registry.run_pipeline(img_bgr, ["caries_detection"], conf_c=conf_threshold_c, use_clahe_c=use_clahe_c, clahe_clip_c=clahe_clip_c, use_sahi_c=use_sahi_c, slice_size_c=slice_size_c, overlap_ratio_c=overlap_ratio_c)
+                results_b = registry.run_pipeline(img_rgb, ["bone_loss_measurement"])
                 
-                # Caries 결과 그리기
-                colors = {0: (0, 0, 255), 1: (0, 255, 255), 2: (255, 165, 0), 3: (128, 0, 128)}
-                for item in final_boxes:
-                    b, c, i = item["box"], item["conf"], item["cls"]
-                    col = colors.get(i, (0, 0, 0))
-                    cv2.rectangle(overlay, (int(b[0]), int(b[1])), (int(b[2]), int(b[3])), col, line_w_c)
-                    cv2.putText(overlay, f"{item['name']} {c:.2f}", (int(b[0]), int(b[1])-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, col, 1)
+                res_c = results_c.get("caries_detection", {})
+                res_b = results_b.get("bone_loss_measurement", {})
+                
+                if res_c.get("status") == "error" or res_b.get("status") == "error":
+                    if res_c.get("status") == "error": st.error(f"Caries Error: {res_c.get('error_message')}")
+                    if res_b.get("status") == "error": st.error(f"BoneLoss Error: {res_b.get('error_message')}")
+                    st.warning("일부 모듈에서 에러가 발생하여 정상 모듈만 표시될 수 있습니다.")
+                
+                overlay = img_rgb.copy()
+                if res_c.get("status") == "success":
+                    proc_bgr = res_c.get("processed_image_bgr", img_bgr)
+                    overlay = cv2.cvtColor(proc_bgr, cv2.COLOR_BGR2RGB)
+                    colors = {0: (0, 0, 255), 1: (0, 255, 255), 2: (255, 165, 0), 3: (128, 0, 128)}
+                    for item in res_c.get("predictions", []):
+                        b, c, i, label = item["bbox"], item["confidence"], item["class_id"], item["label"]
+                        col = colors.get(i, (0, 0, 0))
+                        cv2.rectangle(overlay, (int(b[0]), int(b[1])), (int(b[2]), int(b[3])), col, line_w_c)
+                        cv2.putText(overlay, f"{label} {c:.2f}", (int(b[0]), int(b[1])-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, col, 1)
 
-                dets = bone_detector.predict(img_rgb)
-                
-                upper_cej_pts, lower_cej_pts = [], []
-                upper_crest_pts, lower_crest_pts = [], []
-                mid_y = img_rgb.shape[0] // 2
-                
-                for d in dets:
-                    lms = bone_landmark.predict_landmarks(img_rgb, d["bbox"])
-                    cy = (d["bbox"][1] + d["bbox"][3]) / 2
+                if res_b.get("status") == "success":
+                    upper_cej_pts, lower_cej_pts = [], []
+                    upper_crest_pts, lower_crest_pts = [], []
+                    mid_y = img_rgb.shape[0] // 2
                     
-                    m_cej = (int(lms["mesial_cej"][0]), int(lms["mesial_cej"][1]))
-                    d_cej = (int(lms["distal_cej"][0]), int(lms["distal_cej"][1]))
-                    m_crest = (int(lms["mesial_crest"][0]), int(lms["mesial_crest"][1]))
-                    d_crest = (int(lms["distal_crest"][0]), int(lms["distal_crest"][1]))
-                    
-                    tooth_num = d.get("tooth_number", 0)
-                    if 11 <= tooth_num <= 28:  # 상악
-                        upper_cej_pts.extend([m_cej, d_cej])
-                        upper_crest_pts.extend([m_crest, d_crest])
-                    elif 31 <= tooth_num <= 48:  # 하악
-                        lower_cej_pts.extend([m_cej, d_cej])
-                        lower_crest_pts.extend([m_crest, d_crest])
-                    else:
-                        # 예외 시 Y 좌표 폴백
-                        if cy < mid_y:
+                    for lm_data in res_b.get("landmarks", []):
+                        b = lm_data["bbox"]
+                        cy = (b[1] + b[3]) / 2
+                        m_cej = (int(lm_data["mesial_cej"][0]), int(lm_data["mesial_cej"][1]))
+                        d_cej = (int(lm_data["distal_cej"][0]), int(lm_data["distal_cej"][1]))
+                        m_crest = (int(lm_data["mesial_crest"][0]), int(lm_data["mesial_crest"][1]))
+                        d_crest = (int(lm_data["distal_crest"][0]), int(lm_data["distal_crest"][1]))
+                        
+                        tooth_num = lm_data.get("tooth_number", 0)
+                        if 11 <= tooth_num <= 28:
                             upper_cej_pts.extend([m_cej, d_cej])
                             upper_crest_pts.extend([m_crest, d_crest])
-                        else:
+                        elif 31 <= tooth_num <= 48:
                             lower_cej_pts.extend([m_cej, d_cej])
                             lower_crest_pts.extend([m_crest, d_crest])
-                        
-                upper_cej_pts.sort(key=lambda p: p[0])
-                lower_cej_pts.sort(key=lambda p: p[0])
-                upper_crest_pts.sort(key=lambda p: p[0])
-                lower_crest_pts.sort(key=lambda p: p[0])
-                
-                def draw_connected_line(pts, color):
-                    for i in range(len(pts)-1):
-                        cv2.line(overlay, pts[i], pts[i+1], color, 2)
-                        
-                draw_connected_line(upper_cej_pts, (255, 0, 0))     # CEJ 빨간선
-                draw_connected_line(lower_cej_pts, (255, 0, 0))
-                draw_connected_line(upper_crest_pts, (255, 165, 0)) # Crest 주황선
-                draw_connected_line(lower_crest_pts, (255, 165, 0))
-                        
+                        else:
+                            if cy < mid_y:
+                                upper_cej_pts.extend([m_cej, d_cej])
+                                upper_crest_pts.extend([m_crest, d_crest])
+                            else:
+                                lower_cej_pts.extend([m_cej, d_cej])
+                                lower_crest_pts.extend([m_crest, d_crest])
+                            
+                    upper_cej_pts.sort(key=lambda p: p[0])
+                    lower_cej_pts.sort(key=lambda p: p[0])
+                    upper_crest_pts.sort(key=lambda p: p[0])
+                    lower_crest_pts.sort(key=lambda p: p[0])
+                    
+                    def draw_connected_line(pts, color):
+                        for i in range(len(pts)-1):
+                            cv2.line(overlay, pts[i], pts[i+1], color, 2)
+                            
+                    draw_connected_line(upper_cej_pts, (255, 0, 0))
+                    draw_connected_line(lower_cej_pts, (255, 0, 0))
+                    draw_connected_line(upper_crest_pts, (255, 165, 0))
+                    draw_connected_line(lower_crest_pts, (255, 165, 0))
+                            
                 st.image(overlay, caption="통합 시각화 (병소 탐지 + 치조골 레벨)")
                 st.success("통합 분석 완료!")
