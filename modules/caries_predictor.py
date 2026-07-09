@@ -5,7 +5,7 @@ import cv2
 
 # Submodule 경로 추가
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-caries_src_path = os.path.join(BASE_DIR, "modules", "caries_detection", "src")
+caries_src_path = os.path.join(BASE_DIR, "modules", "Dental_002", "src")
 if caries_src_path not in sys.path:
     sys.path.insert(0, caries_src_path)
 
@@ -46,7 +46,7 @@ class CariesPredictorWrapper(BasePanoramicPredictor):
             })
 
         return {
-            "module_name": "caries_detection",
+            "module_name": "Dental_002_caries_detection",
             "predictions": predictions,
             "processed_image_bgr": proc_bgr,
             "detector_ref": self.detector # For XAI explain later

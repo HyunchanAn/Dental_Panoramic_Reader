@@ -5,8 +5,8 @@ from torchvision.models import mobilenet_v3_small
 
 def export_classifier():
     device = torch.device('cpu')
-    pt_path = "/Users/hyunchanan/.cache/huggingface/hub/models--chemahc94--pano-boneloss-weights/snapshots/b1c5fe275ef3ccc6124498b6c5d04eda16ab4fb3/pano_classifier.pt"
-    onnx_path = "modules/bone_loss/models/pano_classifier.onnx"
+    pt_path = "/Users/hyunchanan/.cache/huggingface/hub/models--chemahc94--Dental_003/snapshots/b1c5fe275ef3ccc6124498b6c5d04eda16ab4fb3/pano_classifier.pt"
+    onnx_path = "modules/Dental_003/models/pano_classifier.onnx"
     
     os.makedirs(os.path.dirname(onnx_path), exist_ok=True)
     

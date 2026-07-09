@@ -35,7 +35,7 @@ jobs:
 
     - name: Verify wrapper imports
       run: |
-        python -c "import sys, os; sys.path.insert(0, os.path.join(os.getcwd(), 'modules', 'caries_detection', 'src')); sys.path.insert(0, os.path.join(os.getcwd(), 'modules', 'bone_loss')); from modules.registry import PredictorRegistry; from modules.caries_predictor import CariesPredictorWrapper; from modules.boneloss_predictor import BoneLossPredictorWrapper; print('Sanity check passed!')"
+        python -c "import sys, os; sys.path.insert(0, os.path.join(os.getcwd(), 'modules', 'Dental_002', 'src')); sys.path.insert(0, os.path.join(os.getcwd(), 'modules', 'Dental_003')); from modules.registry import PredictorRegistry; from modules.caries_predictor import CariesPredictorWrapper; from modules.boneloss_predictor import BoneLossPredictorWrapper; print('Sanity check passed!')"
 
   docker-build:
     name: Verify Docker Build

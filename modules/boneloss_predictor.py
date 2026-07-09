@@ -8,7 +8,7 @@ import onnxruntime as ort
 from PIL import Image
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-boneloss_src_path = os.path.join(BASE_DIR, "modules", "bone_loss")
+boneloss_src_path = os.path.join(BASE_DIR, "modules", "Dental_003")
 if boneloss_src_path not in sys.path:
     sys.path.insert(0, boneloss_src_path)
 
@@ -30,7 +30,8 @@ class BoneLossPredictorWrapper(BasePanoramicPredictor):
 
     def load_model(self, detector_path: str, classifier_path: str) -> None:
         self.detector = ToothDetector(weights_path=detector_path, device=self.device)
-        self.landmark = PerioLandmarkPredictor(device=self.device)
+        sam_path = os.path.join(boneloss_src_path, "models", "sam_vit_b_01ec64.pth")
+        self.landmark = PerioLandmarkPredictor(device=self.device, checkpoint_path=sam_path)
         
         if self.classifier_type == "onnx":
             self.classifier = ort.InferenceSession(classifier_path, providers=['OpenVINOExecutionProvider', 'CPUExecutionProvider'])
@@ -97,7 +98,7 @@ class BoneLossPredictorWrapper(BasePanoramicPredictor):
             })
 
         return {
-            "module_name": "bone_loss_measurement",
+            "module_name": "Dental_003_bone_loss_measurement",
             "metrics": metrics,
             "landmarks": landmarks_data
         }

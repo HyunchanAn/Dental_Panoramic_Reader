@@ -1,6 +1,6 @@
-[submodule "modules/caries_detection"]
-	path = modules/caries_detection
-	url = https://github.com/HyunchanAn/Caries_Detection_from_Panoramic.git
-[submodule "modules/bone_loss"]
-	path = modules/bone_loss
-	url = https://github.com/HyunchanAn/Pano_BoneLoss_Measurement.git
+[submodule "modules/Dental_002"]
+	path = modules/Dental_002
+	url = https://github.com/HyunchanAn/Dental_002.git
+[submodule "modules/Dental_003"]
+	path = modules/Dental_003
+	url = https://github.com/HyunchanAn/Dental_003.git

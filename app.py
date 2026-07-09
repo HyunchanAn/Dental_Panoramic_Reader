@@ -20,8 +20,8 @@ st.sidebar.title("⚙️ Configuration")
 
 with st.sidebar.expander("Caries Detection Settings", expanded=True):
     model_source_c = st.radio("Caries 모델", ["기본 모델", "사용자 학습 모델"])
-    custom_model_c = st.text_input("모델 경로 (.pt)", "modules/caries_detection/models/best_refined.pt")
-    model_path_c = custom_model_c if model_source_c != "기본 모델" else "modules/caries_detection/models/best_refined.pt"
+    custom_model_c = st.text_input("모델 경로 (.pt)", "modules/Dental_002/models/best_refined.pt")
+    model_path_c = custom_model_c if model_source_c != "기본 모델" else "modules/Dental_002/models/best_refined.pt"
     conf_threshold_c = st.slider("Confidence", 0.0, 1.0, 0.25)
     use_sahi_c = st.checkbox("Use SAHI", value=False)
     slice_size_c = st.select_slider("Slice Size", options=[320, 640, 800, 1024], value=640, disabled=not use_sahi_c)
@@ -38,8 +38,8 @@ import sys
 
 # Submodule 경로를 시스템 패키지 경로로 추가하여 pip install 없이도 로드 가능하도록 설정
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(BASE_DIR, "modules", "caries_detection", "src"))
-sys.path.insert(0, os.path.join(BASE_DIR, "modules", "bone_loss"))
+sys.path.insert(0, os.path.join(BASE_DIR, "modules", "Dental_002", "src"))
+sys.path.insert(0, os.path.join(BASE_DIR, "modules", "Dental_003"))
 
 # Import registry and wrappers
 try:
@@ -58,32 +58,32 @@ def load_registry(model_path_c):
     c_path = model_path_c
     if not os.path.exists(c_path):
         try: 
-            c_path = hf_hub_download(repo_id="HyunchanAn/Caries_Detection_from_Panoramic", filename="best_refined.pt")
+            c_path = hf_hub_download(repo_id="chemahc94/Dental_002", filename="best_refined.pt")
         except Exception as e:
             pass # fallback
     caries_wrapper = CariesPredictorWrapper(model_path=c_path)
-    registry.register_module("caries_detection", caries_wrapper)
+    registry.register_module("Dental_002_caries_detection", caries_wrapper)
     
     # Load Bone Loss Wrapper
     device = "cpu"
-    repo_id = "chemahc94/pano-boneloss-weights"
+    repo_id = "chemahc94/Dental_003"  # Unified HF account
     def get_model_path(hf_name, local_path):
         if os.path.exists(local_path): return local_path
         try: return hf_hub_download(repo_id=repo_id, filename=hf_name)
         except Exception: return local_path
 
-    onnx_path = get_model_path("best.onnx", "modules/bone_loss/runs/detect/models/detector_train/weights/best.onnx")
-    pt_path = get_model_path("best.pt", "modules/bone_loss/runs/detect/models/detector_train/weights/best.pt")
+    onnx_path = get_model_path("best.onnx", "modules/Dental_003/runs/detect/models/detector_train/weights/best.onnx")
+    pt_path = get_model_path("best.pt", "modules/Dental_003/runs/detect/models/detector_train/weights/best.pt")
     final_weight = onnx_path if os.path.exists(onnx_path) else pt_path
     
-    cls_onnx = get_model_path("pano_classifier.onnx", "modules/bone_loss/models/pano_classifier.onnx")
+    cls_onnx = get_model_path("pano_classifier.onnx", "modules/Dental_003/models/pano_classifier.onnx")
     if os.path.exists(cls_onnx):
         cls_path, ctype = cls_onnx, "onnx"
     else:
-        cls_path, ctype = get_model_path("pano_classifier.pt", "modules/bone_loss/models/pano_classifier.pt"), "pytorch"
+        cls_path, ctype = get_model_path("pano_classifier.pt", "modules/Dental_003/models/pano_classifier.pt"), "pytorch"
         
     boneloss_wrapper = BoneLossPredictorWrapper(final_weight, cls_path, ctype, device)
-    registry.register_module("bone_loss_measurement", boneloss_wrapper)
+    registry.register_module("Dental_003_bone_loss_measurement", boneloss_wrapper)
     
     return registry
 
@@ -91,7 +91,7 @@ registry = load_registry(model_path_c)
 
 if 'pixels_per_mm' in locals():
     # Update calibration dynamically
-    registry._predictors["bone_loss_measurement"].update_pixels_per_mm(pixels_per_mm)
+    registry._predictors["Dental_003_bone_loss_measurement"].update_pixels_per_mm(pixels_per_mm)
 
 uploaded_file = st.file_uploader("이미지 업로드 (파노라마)", type=['jpg', 'jpeg', 'png'])
 
@@ -108,11 +108,11 @@ if uploaded_file is not None:
         if st.button("우식 탐지 실행"):
             with st.spinner("Caries Detection 중..."):
                 results = registry.run_pipeline(
-                    img_bgr, ["caries_detection"], 
-                    use_clahe_c=use_clahe_c, clahe_clip_c=clahe_clip_c,
-                    use_sahi_c=use_sahi_c, slice_size_c=slice_size_c, overlap_ratio_c=overlap_ratio_c, conf_c=conf_threshold_c
+                    img_bgr, ["Dental_002_caries_detection"], 
+                    conf_c=conf_threshold_c, use_clahe_c=use_clahe_c, clahe_clip_c=clahe_clip_c, 
+                    use_sahi_c=use_sahi_c, slice_size_c=slice_size_c, overlap_ratio_c=overlap_ratio_c
                 )
-                res = results.get("caries_detection", {})
+                res = results.get("Dental_002_caries_detection", {})
                 if res.get("status") == "error":
                     st.error(f"에러 발생: {res.get('error_message')}")
                 else:
@@ -136,8 +136,8 @@ if uploaded_file is not None:
     with tab2:
         if st.button("치조골 판독 실행"):
             with st.spinner("Bone Loss 측정 중..."):
-                results = registry.run_pipeline(img_rgb, ["bone_loss_measurement"])
-                res = results.get("bone_loss_measurement", {})
+                results = registry.run_pipeline(img_rgb, ["Dental_003_bone_loss_measurement"])
+                res = results.get("Dental_003_bone_loss_measurement", {})
                 if res.get("status") == "error":
                     st.error(f"에러 발생: {res.get('error_message')}")
                 else:
@@ -168,11 +168,11 @@ if uploaded_file is not None:
             st.info("두 모델을 모두 실행하여 한 화면에 결과를 합성합니다.")
             with st.spinner("통합 분석 중..."):
                 # run pipelines
-                results_c = registry.run_pipeline(img_bgr, ["caries_detection"], conf_c=conf_threshold_c, use_clahe_c=use_clahe_c, clahe_clip_c=clahe_clip_c, use_sahi_c=use_sahi_c, slice_size_c=slice_size_c, overlap_ratio_c=overlap_ratio_c)
-                results_b = registry.run_pipeline(img_rgb, ["bone_loss_measurement"])
+                results_c = registry.run_pipeline(img_bgr, ["Dental_002_caries_detection"], conf_c=conf_threshold_c, use_clahe_c=use_clahe_c, clahe_clip_c=clahe_clip_c, use_sahi_c=use_sahi_c, slice_size_c=slice_size_c, overlap_ratio_c=overlap_ratio_c)
+                results_b = registry.run_pipeline(img_rgb, ["Dental_003_bone_loss_measurement"])
                 
-                res_c = results_c.get("caries_detection", {})
-                res_b = results_b.get("bone_loss_measurement", {})
+                res_c = results_c.get("Dental_002_caries_detection", {})
+                res_b = results_b.get("Dental_003_bone_loss_measurement", {})
                 
                 if res_c.get("status") == "error" or res_b.get("status") == "error":
                     if res_c.get("status") == "error": st.error(f"Caries Error: {res_c.get('error_message')}")
