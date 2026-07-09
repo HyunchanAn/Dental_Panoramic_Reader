@@ -1,7 +1,0 @@
-/data
-/ufba-425-1
-/models
-.env
-*.pt
-/runs
-__pycache__/
