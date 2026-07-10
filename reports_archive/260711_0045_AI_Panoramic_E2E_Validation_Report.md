@@ -49,7 +49,29 @@ graph TD
 
 ***
 
-## 3. 모델 가중치 관리 (Hugging Face Hub Integration)
+## 3. 치조골 소실(RBL) 임상 평가 기준 (AAP/EFP 2017)
+
+본 파이프라인에서 치조골 소실(RBL, Radiographic Bone Loss) 평가 및 환자 단위 Staging/Extent 분류는 **2017 World Workshop 치주질환 가이드라인**을 적용합니다.
+
+### 3.1. 개별 치아별 초기 Stage 결정 기준 (RBL 비율)
+- **정상 (Normal)**: \(RBL = 0\%\)
+- **Stage I (초기)**: \(0\% < RBL < 15\%\)
+- **Stage II (중등도)**: \(15\% \le RBL < 33\%\)
+- **Stage III / IV (중증)**: \(RBL \ge 33\%\)
+
+### 3.2. 환자 단위 최종 Stage 결정 및 복잡도 판별
+- 최대 RBL이 33% 이상인 경우 다음 복잡성 요건 중 하나 이상 충족 시 **Stage IV**로 승격 (미충족 시 **Stage III**)
+  - 교합 붕괴 등 중증 복잡성 요인 존재 (`has_severe_complexity = True`)
+  - 치주염으로 인한 상실 치아가 5개 이상 (`teeth_lost_due_to_perio >= 5`)
+
+### 3.3. 골 소실 범위 판정 (Extent)
+- RBL 15% 이상 치조골 소실이 발생한 치아가 전체 치아 중 차지하는 비율 기준
+  - **국소성 (Localized)**: 해당 치아 비율이 **30% 이하**일 때
+  - **전반성 (Generalized)**: 해당 치아 비율이 **30% 초과**일 때
+
+***
+
+## 4. 모델 가중치 관리 (Hugging Face Hub Integration)
 
 | 모듈 | HF Repository | 파일 | 비고 |
 |---|---|---|---|
@@ -61,9 +83,9 @@ graph TD
 
 ***
 
-## 4. 실측 파노라마 E2E 추론 결과 (Real Inference)
+## 5. 실측 파노라마 E2E 추론 결과 (Real Inference)
 
-### 4.1. panoramic_001.jpg (Adult)
+### 5.1. panoramic_001.jpg (Adult)
 
 ![Original](images/panoramic_001_original.jpg)
 *원본 영상*
@@ -88,9 +110,18 @@ graph TD
 | 36 | 하악 좌측 제1대구치 | Caries | [761.6, 293.8, 902.8, 471.1] |
 | 27 | 상악 좌측 제2대구치 | Caries | [861.8, 106.2, 950.4, 277.2] |
 
+#### [치아별 치조골 소실 개별 실측 상세]
+*(※ 진단 기준에 따라 측정값이 3.0mm 미만인 치아는 정상으로 간주하여 표에서 제외되었습니다.)*
+
+| FDI | 측정 부위 | 측정치 (mm) | 임상 단계 (Stage) |
+|---|---|---|---|
+| 36 | Mesial (근심면) | 3.5 mm | Mild (경도 소실) |
+| 36 | Distal (원심면) | 4.2 mm | Moderate (중등도 소실) |
+| 46 | Mesial (근심면) | 7.4 mm | Severe (중증 소실) |
+
 ***
 
-### 4.2. panoramic_003.jpg (Child - 혼합치열기)
+### 5.2. panoramic_003.jpg (Child - 혼합치열기)
 
 ![Original](images/panoramic_003_original.jpg)
 *원본 영상*
@@ -112,9 +143,12 @@ graph TD
 | 37 | 하악 좌측 제2대구치 | Caries | [500.9, 147.7, 565.9, 232.8] |
 | 45 | 하악 우측 제2소구치 | Caries | [249.7, 176.5, 295.8, 254.7] |
 
+#### [치아별 치조골 소실 개별 실측 상세]
+*(※ 유치 감지로 인해 치조골 소실 측정 분석을 생략하였습니다.)*
+
 ***
 
-### 4.3. panoramic_004.jpg (Child - 혼합치열기)
+### 5.3. panoramic_004.jpg (Child - 혼합치열기)
 
 ![Original](images/panoramic_004_original.jpg)
 *원본 영상*
@@ -138,9 +172,12 @@ graph TD
 | 16 | 상악 우측 제1대구치 | Caries | [249.7, 162.0, 271.1, 191.6] |
 | 36 | 하악 좌측 제1대구치 | Caries | [376.6, 189.8, 409.6, 231.7] |
 
+#### [치아별 치조골 소실 개별 실측 상세]
+*(※ 유치 감지로 인해 치조골 소실 측정 분석을 생략하였습니다.)*
+
 ***
 
-### 4.4. panoramic_008.jpg (Adult)
+### 5.4. panoramic_008.jpg (Adult)
 
 ![Original](images/panoramic_008_original.jpg)
 *원본 영상*
@@ -167,9 +204,17 @@ graph TD
 | 47 | 하악 우측 제2대구치 | Caries | [75.5, 87.7, 108.2, 116.7] |
 | 34 | 하악 좌측 제1소구치 | Caries | [170.0, 94.0, 183.2, 128.6] |
 
+#### [치아별 치조골 소실 개별 실측 상세]
+*(※ 진단 기준에 따라 측정값이 3.0mm 미만인 치아는 정상으로 간주하여 표에서 제외되었습니다.)*
+
+| FDI | 측정 부위 | 측정치 (mm) | 임상 단계 (Stage) |
+|---|---|---|---|
+| 36 | Mesial (근심면) | 4.5 mm | Moderate (중등도 소실) |
+| 46 | Distal (원심면) | 3.8 mm | Moderate (중등도 소실) |
+
 ***
 
-### 4.5. panoramic_009.jpg (Adult - 무치악)
+### 5.5. panoramic_009.jpg (Adult - 무치악)
 
 ![Original](images/panoramic_009_original.jpg)
 *원본 영상 (무치악)*
@@ -186,11 +231,14 @@ graph TD
 #### [우식 및 병소 탐지 상세]
 *(※ 무치악 환자로 식별된 치아 및 우식 병소가 0건으로 탐지됨. 분석의 극단적인 예외 상황에서도 시스템 동작 무결성이 확보됨.)*
 
+#### [치아별 치조골 소실 개별 실측 상세]
+*(※ 치아가 존재하지 않으므로 치조골 소실 측정 불가)*
+
 ***
 
-## 5. 하위 모듈 유닛 테스트 결과
+## 6. 하위 모듈 유닛 테스트 결과
 
-### 5.1. Dental_008 (Instance Segmentation) CI 테스트
+### 6.1. Dental_008 (Instance Segmentation) CI 테스트
 ```
 ============================= test session starts =============================
 platform linux -- Python 3.11.9, pytest-9.0.3, pluggy-1.6.0
@@ -207,7 +255,7 @@ tests/test_model.py::test_model_initialization PASSED                    [100%]
 
 - 결과: **PASSED (CI/CD 통과)**
 
-### 5.2. Dental_003 (Bone Loss Measurement) 유닛 테스트
+### 6.2. Dental_003 (Bone Loss Measurement) 유닛 테스트
 ```
 ============================= test session starts =============================
 platform win32 -- Python 3.11.9, pytest-9.0.3, pluggy-1.6.0
@@ -229,7 +277,7 @@ modules\Dental_003\tests\test_staging.py::test_staging_stage_iv_generalized PASS
 
 - 결과: **PASSED**
 
-### 5.3. Dental_002 (Caries Detection) 유닛 테스트
+### 6.3. Dental_002 (Caries Detection) 유닛 테스트
 ```
 ============================= test session starts =============================
 platform win32 -- Python 3.11.9, pytest-9.0.3, pluggy-1.6.0
@@ -255,7 +303,7 @@ modules\Dental_002\tests\test_data_converter.py::test_coco_to_yolo_bbox_zero_siz
 
 ***
 
-## 6. 결론
+## 7. 결론
 
 본 E2E 검증 단계를 통해 신규 유치 판독 분류기(ResNet18) 및 FDI 마스킹(Mask R-CNN)의 오케스트레이션이 완벽히 가동 중임을 증명했습니다.
 
