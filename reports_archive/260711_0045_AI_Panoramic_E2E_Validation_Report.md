@@ -96,6 +96,9 @@ graph TD
 ![Caries Detection](images/panoramic_001_caries.jpg)
 *002 모듈 우식 및 병소 탐지 결과*
 
+![BoneLoss Reference](images/panoramic_001_boneloss.jpg)
+*003 모듈 치조골 소실 및 백악법랑경계(CEJ) 랜드마크 추출 결과*
+
 #### [분류기 진단 결과]
 - **유치 존재 여부**: **Negative (Class 0: Adult)** -> 정상 분석 수행
 
@@ -187,6 +190,9 @@ graph TD
 
 ![Caries Detection](images/panoramic_008_caries.jpg)
 *002 모듈 우식 및 병소 탐지 결과*
+
+![BoneLoss Reference](images/panoramic_008_boneloss.jpg)
+*003 모듈 치조골 소실 및 백악법랑경계(CEJ) 랜드마크 추출 결과*
 
 #### [분류기 진단 결과]
 - **유치 존재 여부**: **Negative (Class 0: Adult)** -> 정상 분석 수행
