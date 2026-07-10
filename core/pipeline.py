@@ -1,6 +1,6 @@
 from core.model_manager import ModelManager
 from core.interfaces.dental_004 import init_004_model, run_super_resolution
-from core.interfaces.dental_008 import init_008_model, run_tooth_segmentation
+from core.interfaces.dental_008 import init_008_model, run_tooth_segmentation, init_008_classifier, run_deciduous_classification
 from core.interfaces.dental_002 import init_002_model, run_caries_detection
 from core.interfaces.dental_003 import init_003_model, calculate_bone_loss
 import numpy as np
@@ -26,6 +26,10 @@ class PanoramicPipeline:
         model_008 = init_008_model()
         self.manager.register_model("008", model_008)
         
+        # 008 분류기 (필수: 유치 판별)
+        classifier_008 = init_008_classifier()
+        self.manager.register_model("008_classifier", classifier_008)
+        
         # 002 모델 (필수: 우식/매복 병소)
         model_002 = init_002_model()
         self.manager.register_model("002", model_002)
@@ -48,6 +52,11 @@ class PanoramicPipeline:
             current_img = run_super_resolution(current_img, model_004, self.config_004, self.device)
             result_report['004_image'] = current_img
             
+        # 1.5 008 이진 분류기 (유치 여부 판별)
+        classifier_008 = self.manager.load_to_gpu("008_classifier")
+        has_deciduous = run_deciduous_classification(current_img, classifier_008, self.device)
+        result_report['has_deciduous'] = has_deciduous
+            
         # 2. 008 치아 식별 및 마스킹
         model_008 = self.manager.load_to_gpu("008")
         tooth_roi_data = run_tooth_segmentation(current_img, model_008, self.device)
@@ -62,11 +71,15 @@ class PanoramicPipeline:
         result_report['002_lesions'] = mapped_lesions
         
         # 4. 003 치조골 소실 측정
-        # 003은 치아를 직접 찾지 않고 008의 tooth_roi_data를 그대로 인자로 받습니다.
-        model_003 = self.manager.load_to_gpu("003")
-        if model_003 is not None:
-            bone_loss_data = calculate_bone_loss(current_img, tooth_roi_data, model_003)
-            result_report['003_bone_loss'] = bone_loss_data
+        # 사용자 지시사항: 유치(has_deciduous)가 감지되면 치아 식별(008)과 병소 판독(002)은 진행하되 치조골 레벨 측정을 건너뜀.
+        if has_deciduous:
+            result_report['003_bone_loss'] = None
+            print("Notice: Deciduous teeth detected. Skipping 003 Bone Loss Measurement.")
+        else:
+            model_003 = self.manager.load_to_gpu("003")
+            if model_003 is not None:
+                bone_loss_data = calculate_bone_loss(current_img, tooth_roi_data, model_003)
+                result_report['003_bone_loss'] = bone_loss_data
             
         # GPU 캐시 비우기
         self.manager.clear_cache()
