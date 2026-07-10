@@ -1,0 +1,108 @@
+from core.model_manager import ModelManager
+from core.interfaces.dental_004 import init_004_model, run_super_resolution
+from core.interfaces.dental_008 import init_008_model, run_tooth_segmentation
+from core.interfaces.dental_002 import init_002_model, run_caries_detection
+from core.interfaces.dental_003 import init_003_model, calculate_bone_loss
+import numpy as np
+
+class PanoramicPipeline:
+    """Dental Panoramic Reader 통합 파이프라인 오케스트레이터"""
+    
+    def __init__(self, use_004=False):
+        self.manager = ModelManager()
+        self.use_004 = use_004
+        self.device = self.manager.device
+        
+        # 모델 초기화 및 매니저 등록
+        # 필요 시점에만 GPU에 올리도록 처음엔 CPU로 로드
+        
+        # 004 모델 (선택적 구동)
+        if self.use_004:
+            model_004, config_004 = init_004_model()
+            self.manager.register_model("004", model_004)
+            self.config_004 = config_004
+            
+        # 008 모델 (필수: 치아 식별)
+        model_008 = init_008_model()
+        self.manager.register_model("008", model_008)
+        
+        # 002 모델 (필수: 우식/매복 병소)
+        model_002 = init_002_model()
+        self.manager.register_model("002", model_002)
+        
+        # 003 모델 (필수: 치조골 소실)
+        model_003 = init_003_model()
+        if model_003 is not None:
+            self.manager.register_model("003", model_003)
+
+    def run(self, image: np.ndarray) -> dict:
+        """
+        통합 진단 파이프라인을 실행합니다.
+        """
+        result_report = {}
+        current_img = image.copy()
+        
+        # 1. 004 화질 개선 (Optional)
+        if self.use_004:
+            model_004 = self.manager.load_to_gpu("004")
+            current_img = run_super_resolution(current_img, model_004, self.config_004, self.device)
+            result_report['004_image'] = current_img
+            
+        # 2. 008 치아 식별 및 마스킹
+        model_008 = self.manager.load_to_gpu("008")
+        tooth_roi_data = run_tooth_segmentation(current_img, model_008, self.device)
+        result_report['008_tooth_data'] = tooth_roi_data
+        
+        # 3. 002 우식 및 병소 탐지
+        model_002 = self.manager.load_to_gpu("002")
+        caries_data = run_caries_detection(current_img, model_002)
+        
+        # [정합 로직] 002의 BBox(병소)가 008의 BBox(치아) 영역에 포함/교차되는지 판별하여 FDI 매핑
+        mapped_lesions = self._map_lesions_to_fdi(caries_data, tooth_roi_data)
+        result_report['002_lesions'] = mapped_lesions
+        
+        # 4. 003 치조골 소실 측정
+        # 003은 치아를 직접 찾지 않고 008의 tooth_roi_data를 그대로 인자로 받습니다.
+        model_003 = self.manager.load_to_gpu("003")
+        if model_003 is not None:
+            bone_loss_data = calculate_bone_loss(current_img, tooth_roi_data, model_003)
+            result_report['003_bone_loss'] = bone_loss_data
+            
+        # GPU 캐시 비우기
+        self.manager.clear_cache()
+        
+        return result_report
+
+    def _map_lesions_to_fdi(self, caries_data, tooth_roi_data):
+        """002 모듈의 병소 BBox와 008 모듈의 치아 BBox를 기하학적으로 매핑합니다."""
+        mapped = []
+        for i, lesion_box in enumerate(caries_data['boxes']):
+            lesion_label = caries_data['labels'][i]
+            best_iou = 0
+            best_fdi = "Unknown"
+            
+            # 모든 치아 박스와 비교하여 가장 겹침(IoU)이 큰 치아 번호를 할당
+            for j, tooth_box in enumerate(tooth_roi_data['boxes']):
+                fdi = tooth_roi_data['fdi_labels'][j]
+                iou = self._calculate_iou(lesion_box, tooth_box)
+                if iou > best_iou:
+                    best_iou = iou
+                    best_fdi = fdi
+                    
+            mapped.append({
+                'lesion_type': lesion_label,
+                'box': lesion_box,
+                'fdi': best_fdi
+            })
+            
+        return mapped
+        
+    def _calculate_iou(self, boxA, boxB):
+        # 단순 교차 영역 면적 비율 (Intersection over Area of Lesion)
+        xA = max(boxA[0], boxB[0])
+        yA = max(boxA[1], boxB[1])
+        xB = min(boxA[2], boxB[2])
+        yB = min(boxA[3], boxB[3])
+        interArea = max(0, xB - xA) * max(0, yB - yA)
+        boxAArea = (boxA[2] - boxA[0]) * (boxA[3] - boxA[1])
+        return interArea / float(boxAArea) if boxAArea > 0 else 0
