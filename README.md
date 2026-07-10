@@ -11,19 +11,25 @@
 
 ```mermaid
 graph TD
-    A["Raw Pano X-Ray"] -->|Optional| B["[Dental_004] SwinIR<br>(Super Resolution)"]
+    A["Raw Pano X-Ray"] -->|Optional| B["Dental_004 SwinIR (Super Resolution)"]
     A -->|Bypass| C["Base Image"]
     B --> C["High-Res Image"]
     
-    C --> D["[Dental_008] Mask R-CNN<br>(FDI 치아 식별 및 마스크 추출)"]
+    C --> P["Dental_008_Classifier ResNet18 (Deciduous Classification)"]
     
-    D -->|FDI Masks & BBoxes| E["[Dental_002] YOLOv11<br>(우식, 매복치 병소 탐지 및 매핑)"]
-    D -->|FDI Masks & BBoxes| F["[Dental_003] 랜드마크 추출<br>(치조골 소실량 측정)"]
+    P -->|Class 1 Child| D["Dental_008 Mask R-CNN (FDI Segmentation)"]
+    P -->|Class 0 Adult| D
     
-    E --> G["[Orchestrator] 통합 결과 취합"]
+    D --> E["Dental_002 YOLOv11 (Caries Detection)"]
+    
+    P -.->|Class 1 Child| SKIP["Skip Bone Loss (Bypass)"]
+    D -->|Class 0 Adult| F["Dental_003 Landmark (Bone Loss Measurement)"]
+    
+    E --> G["Orchestrator (Combined Report)"]
     F --> G
+    SKIP -.-> G
     
-    G --> H["[Streamlit UI] 통합 진단 리포트 출력"]
+    G --> H["Streamlit UI Display"]
 ```
 
 ### 각 모듈별 상세 역할
