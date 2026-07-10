@@ -75,6 +75,8 @@ def run_tooth_segmentation(image: np.ndarray, model, device, conf_threshold=0.5)
         
     return result
 
+from huggingface_hub import hf_hub_download
+
 def init_008_classifier():
     """Dental_008 유치 이진 분류기를 초기화하여 반환합니다."""
     model = models.resnet18(weights=None)
@@ -82,6 +84,13 @@ def init_008_classifier():
     model.fc = nn.Linear(num_ftrs, 1)
     
     ckpt_path = os.path.abspath(os.path.join(current_dir, "../../modules/Dental_008/weights/pretrained/classifier_best.pth"))
+    if not os.path.exists(ckpt_path):
+        try:
+            print("Downloading deciduous classifier from Hugging Face...")
+            ckpt_path = hf_hub_download(repo_id="chemahc94/dentex-tooth-segmentation", filename="classifier_best.pth")
+        except Exception as e:
+            print(f"Failed to download classifier from Hugging Face: {e}")
+            
     if os.path.exists(ckpt_path):
         checkpoint = torch.load(ckpt_path, map_location='cpu')
         model.load_state_dict(checkpoint)

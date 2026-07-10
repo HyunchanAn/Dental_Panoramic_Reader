@@ -11,7 +11,9 @@ if module_path not in sys.path:
 
 def init_002_model():
     """Dental_002 (Caries & Impacted) YOLOv11 모델을 초기화합니다."""
-    model_path = os.path.join(module_path, "models", "best.pt")
+    model_path = os.path.join(module_path, "models", "best_refined.pt")
+    if not os.path.exists(model_path):
+        model_path = os.path.join(module_path, "models", "best.pt")
     if not os.path.exists(model_path):
         # fallback
         model_path = os.path.join(module_path, "runs", "detect", "train", "weights", "best.pt")
