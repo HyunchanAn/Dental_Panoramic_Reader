@@ -34,13 +34,7 @@ graph TD
 
     %% Resource Management
     subgraph "GPU Memory Orchestration"
-        MM["Model Manager<br/>(OOM 방지 / 동적 Load & Unload)"] -.-> SR
-        MM -.-> D8_Class
-        MM -.-> D8_Seg
-        MM -.-> D2
-        MM -.-> D3
-        MM -.-> D12
-        MM -.-> D13
+        MM["Model Manager<br/>(OOM 방지 / 동적 Load & Unload)"]
     end
 
     classDef optional fill:#f9f,stroke:#333,stroke-width:2px,stroke-dasharray: 5 5,color:#000;
