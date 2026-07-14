@@ -50,7 +50,7 @@ class PanoramicPipeline:
         self.manager.register_model("012", model_012)
         
         # 013 모델 (필수: 수복물 분류)
-        model_013_path = os.path.join(base_dir, "modules", "Dental_013", "models", "best.pt")
+        model_013_path = os.path.join(base_dir, "modules", "Dental_013", "models", "best_restoration_model.pth")
         model_013 = RestorationPredictorWrapper(model_path=model_013_path)
         self.manager.register_model("013", model_013)
 

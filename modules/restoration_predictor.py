@@ -57,7 +57,7 @@ class RestorationPredictorWrapper(BasePanoramicPredictor):
             fdi = tooth.get("fdi")
             bbox = tooth.get("bbox") # [x1, y1, x2, y2]
             
-            if not fdi or not bbox:
+            if fdi is None or bbox is None or len(bbox) != 4:
                 continue
                 
             x1, y1, x2, y2 = map(int, bbox)
