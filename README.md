@@ -12,24 +12,24 @@
 ```mermaid
 graph TD
     %% Main Inputs
-    Input[Raw Panoramic Image] --> |Optional| SR(Dental_004: Super Resolution<br/>이미지 화질 개선)
+    Input["Raw Panoramic Image"] --> |Optional| SR("Dental_004: Super Resolution<br/>이미지 화질 개선")
     Input --> |Bypass| MainFlow
-    SR --> MainFlow{Image Ready}
+    SR --> MainFlow{"Image Ready"}
 
     %% Phase 1: Global Analysis
-    MainFlow --> D8_Class(Dental_008_Classifier: Deciduous Check<br/>유치 식별)
-    D8_Class --> |has_deciduous: Boolean| PipelineController((Pipeline<br/>Controller))
+    MainFlow --> D8_Class("Dental_008_Classifier: Deciduous Check<br/>유치 식별")
+    D8_Class --> |"has_deciduous: Boolean"| PipelineController(("Pipeline<br/>Controller"))
     
     %% Phase 2: Tooth Segmentation
-    MainFlow --> D8_Seg(Dental_008: Tooth Segmentation<br/>치아 분할 및 FDI 번호 부여)
+    MainFlow --> D8_Seg("Dental_008: Tooth Segmentation<br/>치아 분할 및 FDI 번호 부여")
     D8_Seg --> |"Tooth ROI (BBoxes, Masks, FDI)"| PipelineController
 
     %% Phase 3: Detailed Prediction Modules
-    PipelineController --> |"Image & BBoxes"| D2(Dental_002: Caries Detection<br/>우식/충치 병소 탐지)
-    PipelineController --> |"Image & BBoxes"| D12(Dental_012: Periapical Lesion<br/>치근단 병소 탐지)
-    PipelineController --> |"Image & BBoxes"| D13(Dental_013: Restoration Predictor<br/>보철물/수복물 분류)
+    PipelineController --> |"Image & BBoxes"| D2("Dental_002: Caries Detection<br/>우식/충치 병소 탐지")
+    PipelineController --> |"Image & BBoxes"| D12("Dental_012: Periapical Lesion<br/>치근단 병소 탐지")
+    PipelineController --> |"Image & BBoxes"| D13("Dental_013: Restoration Predictor<br/>보철물/수복물 분류")
     
-    PipelineController --> |"Image & Masks"<br/>Skip if Deciduous=True| D3(Dental_003: Bone Loss<br/>치조골 소실 측정)
+    PipelineController --> |"Image & Masks<br/>Skip if Deciduous=True"| D3("Dental_003: Bone Loss<br/>치조골 소실 측정")
 
     %% Post-processing & Output
     D2 --> |"Caries BBoxes + FDI Mapping"| OutputReport
@@ -37,11 +37,11 @@ graph TD
     D12 --> |"Periapical BBoxes + FDI Mapping"| OutputReport
     D13 --> |"Restoration Classes + Probabilities"| OutputReport
 
-    OutputReport((Final Report<br/>JSON & UI Render))
+    OutputReport(("Final Report<br/>JSON & UI Render"))
 
     %% Resource Management
     subgraph "GPU Memory Orchestration"
-        MM[Model Manager<br/>(OOM 방지 / 동적 Load & Unload)] -.-> SR
+        MM["Model Manager<br/>(OOM 방지 / 동적 Load & Unload)"] -.-> SR
         MM -.-> D8_Class
         MM -.-> D8_Seg
         MM -.-> D2
