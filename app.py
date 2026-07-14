@@ -46,6 +46,10 @@ try:
     from modules.registry import PredictorRegistry
     from modules.caries_predictor import CariesPredictorWrapper
     from modules.boneloss_predictor import BoneLossPredictorWrapper
+    from modules.segmentation_predictor import SegmentationPredictorWrapper
+    from modules.impacted_tooth_predictor import ImpactedToothPredictorWrapper
+    from modules.missing_tooth_predictor import MissingToothPredictorWrapper
+    from modules.age_predictor import AgePredictorWrapper
 except ImportError as e:
     st.error(f"모듈 로드 에러: {e}")
     st.stop()
@@ -84,6 +88,24 @@ def load_registry(model_path_c):
         
     boneloss_wrapper = BoneLossPredictorWrapper(final_weight, cls_path, ctype, device)
     registry.register_module("Dental_003_bone_loss_measurement", boneloss_wrapper)
+    
+    # Load Segmentation Wrapper (008)
+    seg_path = get_model_path("best.pt", "modules/Dental_008/models/best.pt")
+    seg_wrapper = SegmentationPredictorWrapper(model_path=seg_path)
+    registry.register_module("Dental_008_segmentation", seg_wrapper)
+    
+    # Load Impacted Tooth Wrapper (009)
+    impacted_wrapper = ImpactedToothPredictorWrapper()
+    registry.register_module("Dental_009_impacted_tooth", impacted_wrapper)
+    
+    # Load Missing Tooth Wrapper (010)
+    missing_wrapper = MissingToothPredictorWrapper()
+    registry.register_module("Dental_010_missing_tooth", missing_wrapper)
+    
+    # Load Age Predictor Wrapper (011)
+    age_path = get_model_path("best_hybrid_age_model.pth", "modules/Dental_011/src/weights/best_hybrid_age_model.pth")
+    age_wrapper = AgePredictorWrapper(model_path=age_path)
+    registry.register_module("Dental_011_age_estimation", age_wrapper)
     
     return registry
 
