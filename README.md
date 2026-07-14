@@ -16,28 +16,21 @@ graph TD
     Input --> |Bypass| MainFlow
     SR --> MainFlow{"Image Ready"}
 
-    %% Phase 1: Global Analysis
+    %% Phase 1 & 2: Global Analysis & Segmentation
     MainFlow --> D8_Class("Dental_008_Classifier: Deciduous Check<br/>유치 식별")
-    D8_Class --> |"has_deciduous: Boolean"| PipelineController(("Pipeline<br/>Controller"))
-    
-    %% Phase 2: Tooth Segmentation
-    MainFlow --> D8_Seg("Dental_008: Tooth Segmentation<br/>치아 분할 및 FDI 번호 부여")
-    D8_Seg --> |"Tooth ROI (BBoxes, Masks, FDI)"| PipelineController
+    D8_Class --> |"has_deciduous"| D8_Seg("Dental_008: Tooth Segmentation<br/>치아 분할 및 FDI 부여")
 
     %% Phase 3: Detailed Prediction Modules
-    PipelineController --> |"Image & BBoxes"| D2("Dental_002: Caries Detection<br/>우식/충치 병소 탐지")
-    PipelineController --> |"Image & BBoxes"| D12("Dental_012: Periapical Lesion<br/>치근단 병소 탐지")
-    PipelineController --> |"Image & BBoxes"| D13("Dental_013: Restoration Predictor<br/>보철물/수복물 분류")
-    
-    PipelineController --> |"Image & Masks<br/>Skip if Deciduous=True"| D3("Dental_003: Bone Loss<br/>치조골 소실 측정")
+    D8_Seg --> |"Tooth ROI"| D2("Dental_002: Caries Detection<br/>우식/충치 탐지")
+    D8_Seg --> |"Tooth ROI"| D12("Dental_012: Periapical Lesion<br/>치근단 병소 탐지")
+    D8_Seg --> |"Tooth ROI"| D13("Dental_013: Restoration Predictor<br/>보철물 분류")
+    D8_Seg --> |"Skip if Child"| D3("Dental_003: Bone Loss<br/>치조골 소실 측정")
 
     %% Post-processing & Output
-    D2 --> |"Caries BBoxes + FDI Mapping"| OutputReport
-    D3 --> |"Bone Loss Levels"| OutputReport
-    D12 --> |"Periapical BBoxes + FDI Mapping"| OutputReport
-    D13 --> |"Restoration Classes + Probabilities"| OutputReport
-
-    OutputReport(("Final Report<br/>JSON & UI Render"))
+    D2 --> OutputReport(("Final Report<br/>JSON & UI Render"))
+    D3 --> OutputReport
+    D12 --> OutputReport
+    D13 --> OutputReport
 
     %% Resource Management
     subgraph "GPU Memory Orchestration"
