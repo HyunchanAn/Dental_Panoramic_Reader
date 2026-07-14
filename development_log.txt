@@ -23,3 +23,8 @@
 - [modules/Dental_008] 서브모듈 가중치 누락 문제를 가중치 파일(mask_rcnn_dentex_best.pth) 복사를 통해 해결 및 추론 정상화.
 - 최종 E2E 검증 보고서의 FDI 마스킹 이미지를 부위별 지정 색상(전치부: 하늘색, 소구치부: 분홍색, 대구치부: 파란색) 및 80% 투명도 마스크로 재생성하여 업데이트 완료.
 - Dental_003 README.md 파일에 치조골 소실 계측 시각화 분석 결과 예시 이미지(boneloss_example.jpg) 추가 완료.
+
+## 2026-07-14
+- Dental_009(Impacted Tooth), Dental_010(Missing Tooth) 모듈의 Wrapper 인터페이스 구현 및 메인 앱(app.py) 레지스트리 통합 연동 완료.
+- Dental_011(Dental Age Estimation) 신규 모듈 레포지토리 구축 및 PyTorch 기반 베이스라인 코드(학습, 검증) 작성 완료.
+- 사용자 고성능 워크스테이션에서의 학습 진행을 위해 Dental_011 연동용 AgePredictorWrapper 사전 정의 및 app.py 레지스트리 추가 완료.
