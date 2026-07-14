@@ -72,8 +72,6 @@ streamlit run app.py
 ## 라이선스
 MIT License
 
-## 학습 환경 (Training Environment)
-> **[학습 환경 사양]** 실질적 모델 학습은 **RTX 5080 + 라이젠9-6 9900x** 환경에서 진행되었습니다.
 
 ## 개요
 이 레포지토리는 치과 AI 모듈러 시스템의 일부입니다.
