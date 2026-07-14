@@ -12,7 +12,9 @@ class ModelManager:
     
     def register_model(self, name, model):
         """모델을 등록하고 기본적으로 CPU에 둡니다."""
-        self.models[name] = model.to('cpu')
+        if hasattr(model, 'to'):
+            model = model.to('cpu')
+        self.models[name] = model
     
     def get_model(self, name):
         return self.models.get(name)
@@ -20,10 +22,11 @@ class ModelManager:
     def load_to_gpu(self, name):
         """특정 모델을 GPU로 올립니다. 이때 다른 모델들은 CPU로 내립니다."""
         for n, m in self.models.items():
-            if n == name:
-                m.to(self.device)
-            else:
-                m.to('cpu')
+            if hasattr(m, 'to'):
+                if n == name:
+                    m.to(self.device)
+                else:
+                    m.to('cpu')
         
         # PyTorch VRAM 캐시 완전 삭제
         if torch.cuda.is_available():
