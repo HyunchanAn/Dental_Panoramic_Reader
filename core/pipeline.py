@@ -3,7 +3,9 @@ from core.interfaces.dental_004 import init_004_model, run_super_resolution
 from core.interfaces.dental_008 import init_008_model, run_tooth_segmentation, init_008_classifier, run_deciduous_classification
 from core.interfaces.dental_002 import init_002_model, run_caries_detection
 from core.interfaces.dental_003 import init_003_model, calculate_bone_loss
+from modules.periapical_predictor import PeriapicalPredictorWrapper
 import numpy as np
+import os
 
 class PanoramicPipeline:
     """Dental Panoramic Reader 통합 파이프라인 오케스트레이터"""
@@ -38,6 +40,13 @@ class PanoramicPipeline:
         model_003 = init_003_model()
         if model_003 is not None:
             self.manager.register_model("003", model_003)
+            
+        # 012 모델 (필수: 치근단 병소 탐지)
+        # Assuming Dental_012 is located at the same level as Dental_Panoramic_Reader
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        model_012_path = os.path.join(base_dir, "Dental_012", "models", "best.pt")
+        model_012 = PeriapicalPredictorWrapper(model_path=model_012_path)
+        self.manager.register_model("012", model_012)
 
     def run(self, image: np.ndarray) -> dict:
         """
@@ -80,6 +89,19 @@ class PanoramicPipeline:
             if model_003 is not None:
                 bone_loss_data = calculate_bone_loss(current_img, tooth_roi_data, model_003)
                 result_report['003_bone_loss'] = bone_loss_data
+                
+        # 5. 012 치근단 병소 탐지 및 FDI 매칭
+        model_012 = self.manager.load_to_gpu("012")
+        if model_012 is not None:
+            # 008에서 얻은 tooth_roi_data 형식을 012의 _match_fdi에 맞게 변환
+            # (periapical_predictor expects a list of dicts: {"fdi": int, "contour": np.array})
+            formatted_teeth_data = []
+            if tooth_roi_data and 'fdi_labels' in tooth_roi_data and 'contours' in tooth_roi_data:
+                for fdi, contour in zip(tooth_roi_data['fdi_labels'], tooth_roi_data['contours']):
+                    formatted_teeth_data.append({"fdi": fdi, "contour": contour})
+            
+            periapical_data = model_012.predict(current_img, teeth_data=formatted_teeth_data)
+            result_report['012_periapical'] = periapical_data
             
         # GPU 캐시 비우기
         self.manager.clear_cache()

@@ -107,6 +107,12 @@ def load_registry(model_path_c):
     age_wrapper = AgePredictorWrapper(model_path=age_path)
     registry.register_module("Dental_011_age_estimation", age_wrapper)
     
+    # Load Periapical Predictor Wrapper (012)
+    from modules.periapical_predictor import PeriapicalPredictorWrapper
+    periapical_path = get_model_path("periapical_best.pt", "modules/Dental_012/runs/detect/periapical_yolo11s/weights/best.pt")
+    periapical_wrapper = PeriapicalPredictorWrapper(model_path=periapical_path)
+    registry.register_module("Dental_012_periapical", periapical_wrapper)
+    
     return registry
 
 registry = load_registry(model_path_c)
