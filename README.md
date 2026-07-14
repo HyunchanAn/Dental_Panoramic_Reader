@@ -11,39 +11,81 @@
 
 ```mermaid
 graph TD
-    A["Raw Pano X-Ray"] -->|Optional| B["Dental_004 SwinIR (Super Resolution)"]
-    A -->|Bypass| C["Base Image"]
-    B --> C["High-Res Image"]
+    %% Main Inputs
+    Input[Raw Panoramic Image] --> |Optional| SR(Dental_004: Super Resolution<br/>이미지 화질 개선)
+    Input --> |Bypass| MainFlow
+    SR --> MainFlow{Image Ready}
+
+    %% Phase 1: Global Analysis
+    MainFlow --> D8_Class(Dental_008_Classifier: Deciduous Check<br/>유치 식별)
+    D8_Class --> |has_deciduous: Boolean| PipelineController((Pipeline<br/>Controller))
     
-    C --> P["Dental_008_Classifier ResNet18 (Deciduous Classification)"]
+    %% Phase 2: Tooth Segmentation
+    MainFlow --> D8_Seg(Dental_008: Tooth Segmentation<br/>치아 분할 및 FDI 번호 부여)
+    D8_Seg --> |"Tooth ROI (BBoxes, Masks, FDI)"| PipelineController
+
+    %% Phase 3: Detailed Prediction Modules
+    PipelineController --> |"Image & BBoxes"| D2(Dental_002: Caries Detection<br/>우식/충치 병소 탐지)
+    PipelineController --> |"Image & BBoxes"| D12(Dental_012: Periapical Lesion<br/>치근단 병소 탐지)
+    PipelineController --> |"Image & BBoxes"| D13(Dental_013: Restoration Predictor<br/>보철물/수복물 분류)
     
-    P -->|Class 1 Child| D["Dental_008 YOLOv8 Seg + DP (FDI Segmentation)"]
-    P -->|Class 0 Adult| D
-    
-    D --> E["Dental_002 YOLOv11 (Caries Detection)"]
-    
-    P -.->|Class 1 Child| SKIP["Skip Bone Loss & Impacted (Bypass)"]
-    D -->|Class 0 Adult| F["Dental_003 Landmark (Bone Loss Measurement)"]
-    
-    D --> I["Dental_010 (Missing/Supernumerary Tooth Detection)"]
-    D --> J["Dental_009 (Impacted Tooth Analysis)"]
-    
-    E --> G["Orchestrator (Combined Report)"]
-    F --> G
-    I --> G
-    J --> G
-    SKIP -.-> G
-    
-    G --> H["Streamlit UI Display"]
+    PipelineController --> |"Image & Masks"<br/>Skip if Deciduous=True| D3(Dental_003: Bone Loss<br/>치조골 소실 측정)
+
+    %% Post-processing & Output
+    D2 --> |"Caries BBoxes + FDI Mapping"| OutputReport
+    D3 --> |"Bone Loss Levels"| OutputReport
+    D12 --> |"Periapical BBoxes + FDI Mapping"| OutputReport
+    D13 --> |"Restoration Classes + Probabilities"| OutputReport
+
+    OutputReport((Final Report<br/>JSON & UI Render))
+
+    %% Resource Management
+    subgraph "GPU Memory Orchestration"
+        MM[Model Manager<br/>(OOM 방지 / 동적 Load & Unload)] -.-> SR
+        MM -.-> D8_Class
+        MM -.-> D8_Seg
+        MM -.-> D2
+        MM -.-> D3
+        MM -.-> D12
+        MM -.-> D13
+    end
+
+    classDef optional fill:#f9f,stroke:#333,stroke-width:2px,stroke-dasharray: 5 5;
+    classDef core fill:#bbf,stroke:#333,stroke-width:2px;
+    classDef analysis fill:#bfb,stroke:#333,stroke-width:2px;
+    classDef output fill:#fbb,stroke:#333,stroke-width:2px;
+
+    class SR optional;
+    class D8_Class,D8_Seg core;
+    class D2,D3,D12,D13 analysis;
+    class OutputReport output;
 ```
 
-### 각 모듈별 상세 역할
-1. **Dental_004 (화질 개선)**: 해상도가 낮거나 노이즈가 많은 입력 원본 이미지를 SwinIR 모델을 통해 스케일업(Super Resolution) 및 노이즈 제거 처리합니다.
-2. **Dental_008 (치아 식별 및 영역 분할)**: YOLOv8 Instance Segmentation 모델로 치아를 검출하고, 기하학적 간격 기반 DP 알고리즘을 통해 결손치 상황에서도 치식 번호(FDI)를 정확히 부여합니다. 파이프라인의 **Backbone** 역할을 수행합니다.
-3. **Dental_010 (결손/과잉치 판별)**: 008이 제공한 FDI 리스트를 기반으로 순수 집합(Set) 연산을 수행, 한국인 특화 발치 케이스(사랑니, 소구치 등)에 대한 결손치를 정확히 도출합니다.
-4. **Dental_009 (매복치 정밀 분석)**: 008이 제공한 제3대구치 마스크 좌표를 주성분 분석(PCA)하여, 제2대구치와의 장축 각도 차이 기반 Winter's Class 및 맹출 상태(Eruption Status)를 계산합니다.
-5. **Dental_002 (병소 탐지)**: YOLOv11 기반 객체 탐지 모델을 통해 충치(Caries) 등의 병리학적 의심 영역을 찾아냅니다. 치아 번호는 008 결과와 정합합니다.
-6. **Dental_003 (치조골 소실 측정)**: SAM 및 랜드마크 알고리즘을 사용해 CEJ, Crest, Apex 좌표를 찍고 RBL(%)을 계산합니다.
+### 각 서브모듈(Submodule)별 상세 역할
+
+1. **Model Manager (Orchestrator)**
+   - VRAM(GPU 메모리) 초과를 방지하기 위해 각 서브모듈의 모델 가중치를 추론 시점에만 동적으로 GPU로 올리고(Load), 사용이 끝나면 내리는(Unload) 메모리 관리 관제탑입니다.
+
+2. **Dental_004 (Super Resolution)** *[선택]*
+   - 저화질 파노라마 사진이 입력되었을 때, 딥러닝 기반으로 해상도를 끌어올려 진단 정확도를 향상시킵니다.
+
+3. **Dental_008 (Tooth Segmentation & Classification)** *[핵심/코어]*
+   - **Classifier**: 사진의 치아 발달 상태를 보고 유치(Deciduous)가 포함되어 있는지 판별합니다. 유치일 경우 성인의 뼈 기준이 적용되는 003(치조골) 모듈 등의 실행을 스킵하도록 파이프라인을 제어합니다.
+   - **Segmentation**: 치아 하나하나의 테두리(BBox)와 영역(Mask)을 따내고, 위치를 기반으로 국제 치아 식별 번호(FDI)를 부여합니다. 이 데이터는 뒤이어 실행되는 모든 분석 모듈의 나침반 역할을 합니다.
+
+4. **Dental_002 (Caries Detection)**
+   - 충치(우식) 병소를 탐지합니다. 여기서 탐지된 병소의 BBox 좌표가 008에서 찾은 치아 BBox와 겹치는지(IoU) 계산하여, 최종적으로 "몇 번 치아에 충치가 있는지"를 매핑합니다.
+
+5. **Dental_003 (Bone Loss)**
+   - 치아 잇몸뼈(치조골)가 얼마나 주저앉았는지(소실되었는지) 비율로 측정합니다. (유치가 감지되면 이 단계는 자동으로 건너뜁니다.)
+
+6. **Dental_012 (Periapical Lesion)**
+   - 008에서 제공한 치아 BBox를 중심으로 이미지를 크롭하여, 치아 뿌리 끝에 염증이나 병소(치근단 병소)가 있는지 정밀 탐지합니다.
+
+7. **Dental_013 (Restoration Classification)**
+   - 각 치아 ROI 이미지를 바탕으로 치아가 Crown, Implant, Filling, RCT(신경치료) 등 어떤 치료/수복을 받은 상태인지 EfficientNet-B0를 통해 5개 클래스로 분류합니다.
+
+> ※ `.gitmodules`에 등록된 009(매복치), 010(결손/과잉치) 등은 차후 개발 및 고도화가 완료되는 대로 메인 흐름에 연동될 예정입니다.
 
 ## 설치 및 실행 방법
 
