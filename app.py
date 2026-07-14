@@ -109,9 +109,15 @@ def load_registry(model_path_c):
     
     # Load Periapical Predictor Wrapper (012)
     from modules.periapical_predictor import PeriapicalPredictorWrapper
-    periapical_path = get_model_path("periapical_best.pt", "modules/Dental_012/runs/detect/periapical_yolo11s/weights/best.pt")
+    periapical_path = get_model_path("best.pt", "modules/Dental_012/models/best.pt")
     periapical_wrapper = PeriapicalPredictorWrapper(model_path=periapical_path)
     registry.register_module("Dental_012_periapical", periapical_wrapper)
+    
+    # Load Restoration Predictor Wrapper (013)
+    from modules.restoration_predictor import RestorationPredictorWrapper
+    restoration_path = get_model_path("best.pt", "modules/Dental_013/models/best.pt")
+    restoration_wrapper = RestorationPredictorWrapper(model_path=restoration_path)
+    registry.register_module("Dental_013_restoration", restoration_wrapper)
     
     return registry
 

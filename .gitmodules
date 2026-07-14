@@ -19,3 +19,9 @@
 [submodule "modules/Dental_011"]
 	path = modules/Dental_011
 	url = https://github.com/HyunchanAn/Dental_011.git
+[submodule "modules/Dental_012"]
+	path = modules/Dental_012
+	url = https://github.com/HyunchanAn/Dental_012.git
+[submodule "modules/Dental_013"]
+	path = modules/Dental_013
+	url = https://github.com/HyunchanAn/Dental_013.git
