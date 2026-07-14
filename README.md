@@ -11,35 +11,54 @@
 
 ```mermaid
 graph TD
-    A["Raw Panoramic Image"]
+    %% Main Inputs
+    Input["Raw Panoramic Image"] --> |Optional| SR("Dental_004: Super Resolution<br/>이미지 화질 개선")
+    Input --> |Bypass| MainFlow
+    SR --> MainFlow{"Image Ready"}
 
-    subgraph "Phase 1: Pre-processing & Global Analysis"
-        B["Dental_004<br/>(Super Resolution)"]
-        C["Dental_008_Classifier<br/>(Deciduous Check)"]
-        D["Dental_008<br/>(Tooth Segmentation & FDI)"]
+    %% Phase 1: Global Analysis
+    MainFlow --> D8_Class("Dental_008_Classifier: Deciduous Check<br/>유치 식별")
+    D8_Class --> |"has_deciduous: Boolean"| PipelineController(("Pipeline<br/>Controller"))
+    
+    %% Phase 2: Tooth Segmentation
+    MainFlow --> D8_Seg("Dental_008: Tooth Segmentation<br/>치아 분할 및 FDI 번호 부여")
+    D8_Seg --> |"Tooth ROI (BBoxes, Masks, FDI)"| PipelineController
+
+    %% Phase 3: Detailed Prediction Modules
+    PipelineController --> |"Image & BBoxes"| D2("Dental_002: Caries Detection<br/>우식/충치 병소 탐지")
+    PipelineController --> |"Image & BBoxes"| D12("Dental_012: Periapical Lesion<br/>치근단 병소 탐지")
+    PipelineController --> |"Image & BBoxes"| D13("Dental_013: Restoration Predictor<br/>보철물/수복물 분류")
+    
+    PipelineController --> |"Image & Masks<br/>Skip if Deciduous=True"| D3("Dental_003: Bone Loss<br/>치조골 소실 측정")
+
+    %% Post-processing & Output
+    D2 --> |"Caries BBoxes + FDI Mapping"| OutputReport
+    D3 --> |"Bone Loss Levels"| OutputReport
+    D12 --> |"Periapical BBoxes + FDI Mapping"| OutputReport
+    D13 --> |"Restoration Classes + Probabilities"| OutputReport
+
+    OutputReport(("Final Report<br/>JSON & UI Render"))
+
+    %% Resource Management
+    subgraph "GPU Memory Orchestration"
+        MM["Model Manager<br/>(OOM 방지 / 동적 Load & Unload)"] -.-> SR
+        MM -.-> D8_Class
+        MM -.-> D8_Seg
+        MM -.-> D2
+        MM -.-> D3
+        MM -.-> D12
+        MM -.-> D13
     end
 
-    subgraph "Phase 2: Detailed Predictions"
-        E["Dental_002<br/>(Caries Detection)"]
-        F["Dental_003<br/>(Bone Loss Measurement)"]
-        G["Dental_012<br/>(Periapical Lesion)"]
-        H["Dental_013<br/>(Restoration Classification)"]
-    end
+    classDef optional fill:#f9f,stroke:#333,stroke-width:2px,stroke-dasharray: 5 5,color:#000;
+    classDef core fill:#bbf,stroke:#333,stroke-width:2px,color:#000;
+    classDef analysis fill:#bfb,stroke:#333,stroke-width:2px,color:#000;
+    classDef output fill:#fbb,stroke:#333,stroke-width:2px,color:#000;
 
-    A -->|"Optional"| B
-    A -->|"Bypass"| C
-    B --> C
-    C -->|"has_deciduous"| D
-    
-    D -->|"Image, BBoxes, Masks, FDI"| E
-    D -->|"Image, BBoxes, Masks, FDI"| F
-    D -->|"Image, BBoxes, Masks, FDI"| G
-    D -->|"Image, BBoxes, Masks, FDI"| H
-    
-    E --> I["Final Report<br/>(JSON & UI Render)"]
-    F -.->|"Skip if Child"| I
-    G --> I
-    H --> I
+    class SR optional;
+    class D8_Class,D8_Seg core;
+    class D2,D3,D12,D13 analysis;
+    class OutputReport output;
 ```
 
 ### 각 서브모듈(Submodule)별 상세 역할
