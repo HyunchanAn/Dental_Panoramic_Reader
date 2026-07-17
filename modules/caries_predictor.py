@@ -42,8 +42,13 @@ class CariesPredictorWrapper(BasePanoramicPredictor):
                 "label": item["name"],
                 "class_id": item["cls"],
                 "confidence": item["conf"],
-                "bbox": item["box"]  # [x1, y1, x2, y2]
+                "bbox": item["box"],  # [x1, y1, x2, y2]
+                "fdi": None
             })
+
+        teeth_data = kwargs.get("teeth_data", None)
+        if teeth_data is not None and len(teeth_data) > 0 and len(predictions) > 0:
+            self._match_fdi(predictions, teeth_data)
 
         return {
             "module_name": "Dental_002_caries_detection",
@@ -51,3 +56,29 @@ class CariesPredictorWrapper(BasePanoramicPredictor):
             "processed_image_bgr": proc_bgr,
             "detector_ref": self.detector # For XAI explain later
         }
+
+    def _match_fdi(self, predictions: list, teeth_data: list):
+        for item in predictions:
+            x1, y1, x2, y2 = item["bbox"]
+            cx = (x1 + x2) / 2.0
+            cy = (y1 + y2) / 2.0
+            
+            best_fdi = None
+            min_dist = float('inf')
+            
+            for tooth in teeth_data:
+                contour = tooth.get("contour")
+                fdi = tooth.get("fdi")
+                if contour is not None and len(contour) > 0:
+                    dist = cv2.pointPolygonTest(np.array(contour, dtype=np.int32), (cx, cy), True)
+                    if dist >= 0:
+                        actual_dist = 0
+                    else:
+                        actual_dist = abs(dist)
+                        
+                    if actual_dist < min_dist:
+                        min_dist = actual_dist
+                        best_fdi = fdi
+                        
+            if best_fdi is not None and min_dist < 200:
+                item["fdi"] = best_fdi

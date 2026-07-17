@@ -14,18 +14,34 @@ class PredictorRegistry:
     def run_pipeline(self, image, selected_modules: list, **kwargs):
         """선택된 모듈들을 순차/병렬로 구동하고 결과를 취합"""
         results = {}
+        base_modules = ["Dental_008_segmentation"]
+        
+        # Stage 1: Run Base Modules
         for name in selected_modules:
-            if name in self._predictors:
+            if name in self._predictors and name in base_modules:
                 try:
-                    # 각 예측기에 특화된 kwargs가 있을 수 있으므로 모두 전달
                     res = self._predictors[name].predict(image, **kwargs)
                     res["status"] = "success"
                     results[name] = res
                 except Exception as e:
-                    logging.error(f"Error running module {name}: {traceback.format_exc()}")
-                    results[name] = {
-                        "module_name": name,
-                        "status": "error",
-                        "error_message": str(e)
-                    }
+                    logging.error(f"Error running base module {name}: {traceback.format_exc()}")
+                    results[name] = {"module_name": name, "status": "error", "error_message": str(e)}
+
+        # 의존성 주입: 008의 결과가 성공적이라면 추출하여 kwargs에 추가
+        if "Dental_008_segmentation" in results and results["Dental_008_segmentation"]["status"] == "success":
+            teeth_data = results["Dental_008_segmentation"].get("teeth", [])
+            kwargs["teeth_data"] = teeth_data
+            kwargs["fdi_list"] = [t["fdi"] for t in teeth_data if "fdi" in t]
+
+        # Stage 2: Run Derived Modules (Those requiring 008 outputs)
+        for name in selected_modules:
+            if name in self._predictors and name not in base_modules:
+                try:
+                    res = self._predictors[name].predict(image, **kwargs)
+                    res["status"] = "success"
+                    results[name] = res
+                except Exception as e:
+                    logging.error(f"Error running derived module {name}: {traceback.format_exc()}")
+                    results[name] = {"module_name": name, "status": "error", "error_message": str(e)}
+
         return results

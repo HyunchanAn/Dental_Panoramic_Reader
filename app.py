@@ -50,6 +50,7 @@ try:
     from modules.impacted_tooth_predictor import ImpactedToothPredictorWrapper
     from modules.missing_tooth_predictor import MissingToothPredictorWrapper
     from modules.age_predictor import AgePredictorWrapper
+    from modules.osteoporosis_predictor import OsteoporosisPredictorWrapper
 except ImportError as e:
     st.error(f"모듈 로드 에러: {e}")
     st.stop()
@@ -80,13 +81,7 @@ def load_registry(model_path_c):
     pt_path = get_model_path("best.pt", "modules/Dental_003/runs/detect/models/detector_train/weights/best.pt")
     final_weight = onnx_path if os.path.exists(onnx_path) else pt_path
     
-    cls_onnx = get_model_path("pano_classifier.onnx", "modules/Dental_003/models/pano_classifier.onnx")
-    if os.path.exists(cls_onnx):
-        cls_path, ctype = cls_onnx, "onnx"
-    else:
-        cls_path, ctype = get_model_path("pano_classifier.pt", "modules/Dental_003/models/pano_classifier.pt"), "pytorch"
-        
-    boneloss_wrapper = BoneLossPredictorWrapper(final_weight, cls_path, ctype, device)
+    boneloss_wrapper = BoneLossPredictorWrapper(final_weight, device)
     registry.register_module("Dental_003_bone_loss_measurement", boneloss_wrapper)
     
     # Load Segmentation Wrapper (008)
@@ -118,6 +113,11 @@ def load_registry(model_path_c):
     restoration_path = get_model_path("best.pt", "modules/Dental_013/models/best.pt")
     restoration_wrapper = RestorationPredictorWrapper(model_path=restoration_path)
     registry.register_module("Dental_013_restoration", restoration_wrapper)
+    
+    # Load Osteoporosis Predictor Wrapper (014)
+    osteo_path = "modules/Dental_014/weights/best_model.pth"
+    osteo_wrapper = OsteoporosisPredictorWrapper(weight_path=osteo_path)
+    registry.register_module("Dental_014_osteoporosis", osteo_wrapper)
     
     return registry
 

@@ -34,6 +34,7 @@ graph TD
 
     %% Phase 1 & 2: Global Analysis & Segmentation
     MainFlow --> D8_Class("Dental_008_Classifier: Deciduous Check<br/>유치 식별")
+    MainFlow --> D14("Dental_014: Osteoporosis Screening<br/>골다공증 위험도 스크리닝")
     D8_Class --> |"has_deciduous"| D8_Seg("Dental_008: Tooth Segmentation<br/>치아 분할 및 FDI 부여")
 
     %% Phase 3: Detailed Prediction Modules
@@ -47,6 +48,7 @@ graph TD
     D3 --> OutputReport
     D12 --> OutputReport
     D13 --> OutputReport
+    D14 --> OutputReport
 
     %% Resource Management
     subgraph "GPU Memory Orchestration"
@@ -60,7 +62,7 @@ graph TD
 
     class SR optional;
     class D8_Class,D8_Seg core;
-    class D2,D3,D12,D13 analysis;
+    class D2,D3,D12,D13,D14 analysis;
     class OutputReport output;
 ```
 
@@ -113,6 +115,22 @@ streamlit run app.py
 ## 시스템 요구사항
 - **GPU**: NVIDIA RTX 4060 Laptop (8GB VRAM) 수준에 맞추어 `core/model_manager.py`가 구동 시나리오별 GPU 메모리 스왑 및 캐시 클리어링(PyTorch VRAM 최적화)을 자동 수행합니다.
 - **OS**: Windows / Linux 지원
+
+## 📚 데이터셋 출처 (Datasets)
+
+본 프로젝트의 각 모듈 학습 및 검증을 위해 사용된 주요 오픈/퍼블릭 데이터셋은 다음과 같습니다:
+
+1. **Tufts Dental Database**
+   - **사용 모듈**: Dental_008 (Tooth Segmentation), Dental_002 (Caries Detection) 등 기본 악안면 분석.
+   - **설명**: 파노라마 엑스레이 이미지에서의 치아 인스턴스 분할 및 질환(우식 등) 탐지를 위한 기본 베이스라인 데이터셋.
+
+2. **Sharda Dataverse Dataset (Osteoporosis Risk Screening)**
+   - **사용 모듈**: Dental_014 (Phase 1: Mandible ROI U-Net Extraction)
+   - **설명**: 초기 하악골(Mandible) 형태 및 ROI(관심 영역) 검출 모델 학습을 위해 사용된 파노라마 데이터셋. (단, 과도한 증강과 환자 식별자 손실 문제로 014 모듈의 Phase 2 분류 학습에서는 배제됨)
+
+3. **BRAR-anchored multimodal dataset**
+   - **사용 모듈**: Dental_014 (Phase 2: Osteopenia / Osteoporosis Classifier)
+   - **설명**: 환자의 실제 임상 골흡수 지표가 신뢰성 있게 매핑(Anchored)된 다중 모달리티 데이터셋. `정상(C1)`, `골감소증(C2)`, `골다공증(C3)` 분류를 위한 최종 Classifier 훈련의 Single Source of Truth로 도입.
 
 ## 라이선스
 MIT License
