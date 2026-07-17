@@ -115,7 +115,14 @@ def load_registry(model_path_c):
     registry.register_module("Dental_013_restoration", restoration_wrapper)
     
     # Load Osteoporosis Predictor Wrapper (014) - End-to-End Multitask Model
-    osteo_weight_path = "modules/Dental_014/weights/best.pt"
+    osteo_weight_path = get_model_path("best.pt", "modules/Dental_014/weights/best.pt")
+    # 014 모델이 허깅페이스 계정 (chemahc94/Dental_014) 에 업로드되어 있다고 가정하고 연동
+    if not os.path.exists(osteo_weight_path):
+        try:
+            osteo_weight_path = hf_hub_download(repo_id="chemahc94/Dental_014", filename="best.pt")
+        except Exception:
+            osteo_weight_path = "modules/Dental_014/weights/best.pt"
+            
     osteo_wrapper = OsteoporosisPredictorWrapper(weight_path=osteo_weight_path)
     registry.register_module("Dental_014_osteoporosis", osteo_wrapper)
     
