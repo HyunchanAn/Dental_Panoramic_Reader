@@ -41,11 +41,17 @@ graph TD
     D8_Seg --> |"Tooth ROI"| D2("Dental_002: Caries Detection<br/>우식/충치 탐지")
     D8_Seg --> |"Tooth ROI"| D12("Dental_012: Periapical Lesion<br/>치근단 병소 탐지")
     D8_Seg --> |"Tooth ROI"| D13("Dental_013: Restoration Predictor<br/>보철물 분류")
+    D8_Seg --> |"Tooth ROI"| D9("Dental_009: Impacted Tooth<br/>매복치 탐지")
+    D8_Seg --> |"FDI Data"| D10("Dental_010: Missing/Supernumerary<br/>결손/과잉치 분석")
+    D8_Seg --> |"FDI Data"| D11("Dental_011: Age Prediction<br/>연령 추정")
     D8_Seg --> |"Skip if Child"| D3("Dental_003: Bone Loss<br/>치조골 소실 측정")
 
     %% Post-processing & Output
     D2 --> OutputReport(("Final Report<br/>JSON & UI Render"))
     D3 --> OutputReport
+    D9 --> OutputReport
+    D10 --> OutputReport
+    D11 --> OutputReport
     D12 --> OutputReport
     D13 --> OutputReport
     D14 --> OutputReport
@@ -62,7 +68,7 @@ graph TD
 
     class SR optional;
     class D8_Class,D8_Seg core;
-    class D2,D3,D12,D13,D14 analysis;
+    class D2,D3,D9,D10,D11,D12,D13,D14 analysis;
     class OutputReport output;
 ```
 
@@ -90,7 +96,17 @@ graph TD
 7. **Dental_013 (Restoration Classification)**
    - 각 치아 ROI 이미지를 바탕으로 치아가 Crown, Implant, Filling, RCT(신경치료) 등 어떤 치료/수복을 받은 상태인지 EfficientNet-B0를 통해 5개 클래스로 분류합니다.
 
-> ※ `.gitmodules`에 등록된 009(매복치), 010(결손/과잉치) 등은 차후 개발 및 고도화가 완료되는 대로 메인 흐름에 연동될 예정입니다.
+8. **Dental_014 (Osteoporosis Screening)**
+   - 하악골 피질골 두께와 다공성을 분석하여 골감소증 및 골다공증 위험도를 스크리닝합니다.
+
+9. **Dental_009 (Impacted Tooth Detection)**
+   - 매복치(Impacted tooth)의 존재 여부와 매복 깊이 및 각도를 분석합니다.
+
+10. **Dental_010 (Missing/Supernumerary Tooth)**
+    - 008에서 부여된 치식(FDI) 데이터를 기반으로 결손치(Missing)나 과잉치(Supernumerary)를 식별합니다.
+
+11. **Dental_011 (Age Prediction)**
+    - 치아 발달 단계 및 맹출 패턴을 분석하여 환자의 치면 연령을 추정합니다.
 
 ## 설치 및 실행 방법
 
