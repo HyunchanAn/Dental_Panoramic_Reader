@@ -114,9 +114,9 @@ def load_registry(model_path_c):
     restoration_wrapper = RestorationPredictorWrapper(model_path=restoration_path)
     registry.register_module("Dental_013_restoration", restoration_wrapper)
     
-    # Load Osteoporosis Predictor Wrapper (014)
-    osteo_path = "modules/Dental_014/weights/best_model.pth"
-    osteo_wrapper = OsteoporosisPredictorWrapper(weight_path=osteo_path)
+    # Load Osteoporosis Predictor Wrapper (014) - End-to-End Multitask Model
+    osteo_weight_path = "modules/Dental_014/weights/best.pt"
+    osteo_wrapper = OsteoporosisPredictorWrapper(weight_path=osteo_weight_path)
     registry.register_module("Dental_014_osteoporosis", osteo_wrapper)
     
     return registry
@@ -199,21 +199,27 @@ if uploaded_file is not None:
 
     with tab3:
         if st.button("통합 분석 실행 (Run All)"):
-            st.info("두 모델을 모두 실행하여 한 화면에 결과를 합성합니다.")
-            with st.spinner("통합 분석 중..."):
-                # run pipelines
-                results_c = registry.run_pipeline(img_bgr, ["Dental_002_caries_detection"], conf_c=conf_threshold_c, use_clahe_c=use_clahe_c, clahe_clip_c=clahe_clip_c, use_sahi_c=use_sahi_c, slice_size_c=slice_size_c, overlap_ratio_c=overlap_ratio_c)
-                results_b = registry.run_pipeline(img_rgb, ["Dental_003_bone_loss_measurement"])
+            st.info("전체 AI 모듈을 병렬 실행하여 다차원 진단 리포트를 생성합니다.")
+            with st.spinner("통합 분석 중... (VRAM 최적화 적용)"):
+                torch.cuda.empty_cache()
+                gc.collect()
                 
-                res_c = results_c.get("Dental_002_caries_detection", {})
-                res_b = results_b.get("Dental_003_bone_loss_measurement", {})
+                all_modules = registry.get_available_modules()
+                results = registry.run_pipeline(
+                    img_bgr, all_modules, 
+                    conf_c=conf_threshold_c, use_clahe_c=use_clahe_c, clahe_clip_c=clahe_clip_c, 
+                    use_sahi_c=use_sahi_c, slice_size_c=slice_size_c, overlap_ratio_c=overlap_ratio_c
+                )
                 
-                if res_c.get("status") == "error" or res_b.get("status") == "error":
-                    if res_c.get("status") == "error": st.error(f"Caries Error: {res_c.get('error_message')}")
-                    if res_b.get("status") == "error": st.error(f"BoneLoss Error: {res_b.get('error_message')}")
-                    st.warning("일부 모듈에서 에러가 발생하여 정상 모듈만 표시될 수 있습니다.")
+                torch.cuda.empty_cache()
+                gc.collect()
+                
+                st.subheader("📊 통합 진단 리포트")
                 
                 overlay = img_rgb.copy()
+                
+                # 1. Caries (002) Overlay
+                res_c = results.get("Dental_002_caries_detection", {})
                 if res_c.get("status") == "success":
                     proc_bgr = res_c.get("processed_image_bgr", img_bgr)
                     overlay = cv2.cvtColor(proc_bgr, cv2.COLOR_BGR2RGB)
@@ -224,47 +230,52 @@ if uploaded_file is not None:
                         cv2.rectangle(overlay, (int(b[0]), int(b[1])), (int(b[2]), int(b[3])), col, line_w_c)
                         cv2.putText(overlay, f"{label} {c:.2f}", (int(b[0]), int(b[1])-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, col, 1)
 
+                # 2. Bone Loss (003) Overlay
+                res_b = results.get("Dental_003_bone_loss_measurement", {})
                 if res_b.get("status") == "success":
-                    upper_cej_pts, lower_cej_pts = [], []
-                    upper_crest_pts, lower_crest_pts = [], []
+                    upper_cej_pts, lower_cej_pts, upper_crest_pts, lower_crest_pts = [], [], [], []
                     mid_y = img_rgb.shape[0] // 2
-                    
                     for lm_data in res_b.get("landmarks", []):
                         b = lm_data["bbox"]
                         cy = (b[1] + b[3]) / 2
-                        m_cej = (int(lm_data["mesial_cej"][0]), int(lm_data["mesial_cej"][1]))
-                        d_cej = (int(lm_data["distal_cej"][0]), int(lm_data["distal_cej"][1]))
-                        m_crest = (int(lm_data["mesial_crest"][0]), int(lm_data["mesial_crest"][1]))
-                        d_crest = (int(lm_data["distal_crest"][0]), int(lm_data["distal_crest"][1]))
-                        
+                        m_cej, d_cej = (int(lm_data["mesial_cej"][0]), int(lm_data["mesial_cej"][1])), (int(lm_data["distal_cej"][0]), int(lm_data["distal_cej"][1]))
+                        m_crest, d_crest = (int(lm_data["mesial_crest"][0]), int(lm_data["mesial_crest"][1])), (int(lm_data["distal_crest"][0]), int(lm_data["distal_crest"][1]))
                         tooth_num = lm_data.get("tooth_number", 0)
-                        if 11 <= tooth_num <= 28:
+                        
+                        if 11 <= tooth_num <= 28 or (tooth_num == 0 and cy < mid_y):
                             upper_cej_pts.extend([m_cej, d_cej])
                             upper_crest_pts.extend([m_crest, d_crest])
-                        elif 31 <= tooth_num <= 48:
+                        else:
                             lower_cej_pts.extend([m_cej, d_cej])
                             lower_crest_pts.extend([m_crest, d_crest])
-                        else:
-                            if cy < mid_y:
-                                upper_cej_pts.extend([m_cej, d_cej])
-                                upper_crest_pts.extend([m_crest, d_crest])
-                            else:
-                                lower_cej_pts.extend([m_cej, d_cej])
-                                lower_crest_pts.extend([m_crest, d_crest])
                             
-                    upper_cej_pts.sort(key=lambda p: p[0])
-                    lower_cej_pts.sort(key=lambda p: p[0])
-                    upper_crest_pts.sort(key=lambda p: p[0])
-                    lower_crest_pts.sort(key=lambda p: p[0])
+                    upper_cej_pts.sort(key=lambda p: p[0]); lower_cej_pts.sort(key=lambda p: p[0])
+                    upper_crest_pts.sort(key=lambda p: p[0]); lower_crest_pts.sort(key=lambda p: p[0])
                     
                     def draw_connected_line(pts, color):
-                        for i in range(len(pts)-1):
-                            cv2.line(overlay, pts[i], pts[i+1], color, 2)
+                        for i in range(len(pts)-1): cv2.line(overlay, pts[i], pts[i+1], color, 2)
                             
-                    draw_connected_line(upper_cej_pts, (255, 0, 0))
-                    draw_connected_line(lower_cej_pts, (255, 0, 0))
-                    draw_connected_line(upper_crest_pts, (255, 165, 0))
-                    draw_connected_line(lower_crest_pts, (255, 165, 0))
+                    draw_connected_line(upper_cej_pts, (255, 0, 0)); draw_connected_line(lower_cej_pts, (255, 0, 0))
+                    draw_connected_line(upper_crest_pts, (255, 165, 0)); draw_connected_line(lower_crest_pts, (255, 165, 0))
                             
-                st.image(overlay, caption="통합 시각화 (병소 탐지 + 치조골 레벨)")
-                st.success("통합 분석 완료!")
+                st.image(overlay, caption="통합 시각화 (002 우식 탐지 + 003 치조골 레벨)")
+                
+                # 3. Dynamic Display for other modules (008, 009, 010, 011, 012, 013, 014)
+                st.markdown("### 기타 모듈 분석 결과")
+                cols = st.columns(3)
+                col_idx = 0
+                for mod_name, res in results.items():
+                    if mod_name in ["Dental_002_caries_detection", "Dental_003_bone_loss_measurement"]:
+                        continue # Already shown in overlay
+                    
+                    with cols[col_idx % 3]:
+                        st.markdown(f"**{mod_name}**")
+                        if res.get("status") == "error":
+                            st.error(res.get("error_message"))
+                        else:
+                            # Filter out large image arrays from display
+                            clean_res = {k: v for k, v in res.items() if k != "status" and not isinstance(v, np.ndarray)}
+                            st.json(clean_res)
+                    col_idx += 1
+                    
+                st.success("모든 모듈 통합 분석이 병렬 최적화 환경에서 완료되었습니다!")

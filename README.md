@@ -96,8 +96,8 @@ graph TD
 7. **Dental_013 (Restoration Classification)**
    - 각 치아 ROI 이미지를 바탕으로 치아가 Crown, Implant, Filling, RCT(신경치료) 등 어떤 치료/수복을 받은 상태인지 EfficientNet-B0를 통해 5개 클래스로 분류합니다.
 
-8. **Dental_014 (Osteoporosis Screening)**
-   - 하악골 피질골 두께와 다공성을 분석하여 골감소증 및 골다공증 위험도를 스크리닝합니다.
+9. **Dental_014 (Osteoporosis Screening)**
+   - 하악 피질골을 분석하여 골감소증 및 골다공증 위험도를 스크리닝합니다. 데이터 부족으로 인한 과적합을 방지하기 위해 정답지 마스크 없이도 정규화가 가능한 **Autoencoder 기반의 End-to-End Multi-task Architecture**가 적용되어 있습니다.
 
 9. **Dental_009 (Impacted Tooth Detection)**
    - 매복치(Impacted tooth)의 존재 여부와 매복 깊이 및 각도를 분석합니다.

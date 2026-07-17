@@ -1,5 +1,6 @@
 import traceback
 import logging
+import concurrent.futures
 
 class PredictorRegistry:
     def __init__(self):
@@ -34,14 +35,22 @@ class PredictorRegistry:
             kwargs["fdi_list"] = [t["fdi"] for t in teeth_data if "fdi" in t]
 
         # Stage 2: Run Derived Modules (Those requiring 008 outputs)
-        for name in selected_modules:
-            if name in self._predictors and name not in base_modules:
-                try:
-                    res = self._predictors[name].predict(image, **kwargs)
-                    res["status"] = "success"
-                    results[name] = res
-                except Exception as e:
-                    logging.error(f"Error running derived module {name}: {traceback.format_exc()}")
-                    results[name] = {"module_name": name, "status": "error", "error_message": str(e)}
+        derived_modules = [name for name in selected_modules if name in self._predictors and name not in base_modules]
+        
+        def run_derived(name):
+            try:
+                res = self._predictors[name].predict(image, **kwargs)
+                res["status"] = "success"
+                return name, res
+            except Exception as e:
+                logging.error(f"Error running derived module {name}: {traceback.format_exc()}")
+                return name, {"module_name": name, "status": "error", "error_message": str(e)}
+
+        # VRAM 한계(8GB)를 고려하여 Max Workers를 2~3개로 제한합니다.
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            future_to_name = {executor.submit(run_derived, name): name for name in derived_modules}
+            for future in concurrent.futures.as_completed(future_to_name):
+                name, res = future.result()
+                results[name] = res
 
         return results

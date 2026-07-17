@@ -28,3 +28,9 @@
 - Dental_009(Impacted Tooth), Dental_010(Missing Tooth) 모듈의 Wrapper 인터페이스 구현 및 메인 앱(app.py) 레지스트리 통합 연동 완료.
 - Dental_011(Dental Age Estimation) 신규 모듈 레포지토리 구축 및 PyTorch 기반 베이스라인 코드(학습, 검증) 작성 완료.
 - 사용자 고성능 워크스테이션에서의 학습 진행을 위해 Dental_011 연동용 AgePredictorWrapper 사전 정의 및 app.py 레지스트리 추가 완료.
+
+## 2026-07-17
+- Dental_012(Cervical Caries), Dental_013(Restoration) 모듈의 Wrapper 인터페이스 구현 및 app.py 통합 완료.
+- Dental_014(Osteoporosis Screening) 신규 서브모듈 연동.
+- Dental_014의 극심한 과적합(Train 96.3% -> Val 58.0%) 문제를 해결하기 위해, 관제탑에서 직접 End-to-End Multi-task Architecture(Autoencoder 기반 Mask-Free 방식)로 모델 구조를 전면 재설계(Hotfix)하여 배포 및 뷰어 추론 로직 핫픽스 적용.
+- 레포지토리 루트 경로의 임시 테스트 파일들 청소 및 reports_archive 구버전 메모 폴더 정리 완료.

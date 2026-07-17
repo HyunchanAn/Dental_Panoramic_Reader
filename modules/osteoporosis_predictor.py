@@ -21,7 +21,9 @@ class OsteoporosisPredictorWrapper(BasePanoramicPredictor):
     def load_model(self, weight_path: str) -> None:
         try:
             self.inferencer = OsteoporosisInferencer(weight_path=weight_path)
-        except FileNotFoundError:
+        except Exception as e:
+            import logging
+            logging.warning(f"Failed to load Osteoporosis End-to-End model: {e}")
             self.inferencer = None # 모델 학습 전이므로 None 허용
 
     def predict(self, image: np.ndarray, **kwargs) -> dict:
@@ -33,13 +35,10 @@ class OsteoporosisPredictorWrapper(BasePanoramicPredictor):
                 "prediction": None
             }
 
-        # TODO: Phase 1 U-Net Crop Logic here
-        # 현재는 입력 이미지를 직접 분류기로 전달 (테스트 목적)
-        
         # Convert numpy RGB to PIL
         pil_img = Image.fromarray(image)
         
-        pred_class, probs = self.inferencer.predict(pil_img)
+        pred_class, probs, mask, geom_feats = self.inferencer.predict(pil_img)
 
         return {
             "module_name": "Dental_014_osteoporosis",
