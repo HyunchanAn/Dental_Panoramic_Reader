@@ -9,51 +9,73 @@ module_path = os.path.abspath(os.path.join(current_dir, "../../modules/Dental_00
 if module_path not in sys.path:
     sys.path.append(module_path)
 
-from dentex_seg.model import get_instance_segmentation_model
-from dentex_seg.dataset import get_fdi_to_class_id
-from torchvision import transforms, models
+from ultralytics import YOLO
 import torch.nn as nn
 from PIL import Image
 
+try:
+    from numbering.arch_sequence_matcher import assign_fdi_labels
+    from numbering.fdi_corrector import correct_fdi_numbers
+except ImportError:
+    pass # Will handle gracefully if path issues exist
+
 def init_008_model():
-    """Dental_008 Mask R-CNN 모델을 초기화하여 반환합니다."""
-    # 모델 로드 (53개 클래스: 영구치 32 + 유치 20 + 배경 1)
-    num_classes = 53
-    model = get_instance_segmentation_model(num_classes)
-    
-    ckpt_path = os.path.abspath(os.path.join(current_dir, "../../modules/Dental_008/weights/mask_rcnn_dentex_best.pth"))
-    # best.pth가 없으면 fallback
+    """Dental_008 YOLOv8 모델을 초기화하여 반환합니다."""
+    ckpt_path = os.path.abspath(os.path.join(current_dir, "../../modules/Dental_008/yolov8m-seg.pt"))
     if not os.path.exists(ckpt_path):
-        ckpt_path = os.path.abspath(os.path.join(current_dir, "../../modules/Dental_008/weights/mask_rcnn_dentex_epoch_5.pth"))
+        # Fallback to weights directory
+        ckpt_path = os.path.abspath(os.path.join(current_dir, "../../modules/Dental_008/weights/yolov8m-seg.pt"))
         
-    if os.path.exists(ckpt_path):
-        checkpoint = torch.load(ckpt_path, map_location='cpu')
-        model.load_state_dict(checkpoint)
+    try:
+        model = YOLO(ckpt_path)
+    except Exception as e:
+        print(f"Failed to load YOLO model: {e}")
+        model = None
     
-    model.eval()
     return model
 
 def run_tooth_segmentation(image: np.ndarray, model, device, conf_threshold=0.5) -> dict:
     """
-    치아 식별 및 영역 분할을 수행합니다.
+    YOLOv8 및 2-Stage Sequence Matcher를 사용하여 치아 식별 및 영역 분할을 수행합니다.
     Args:
         image: RGB numpy array (H, W, 3)
     Returns:
         dict: {'boxes': [...], 'masks': [...], 'fdi_labels': [...], 'scores': [...]}
     """
-    _, id_to_fdi = get_fdi_to_class_id()
+    h, w, _ = image.shape
     
-    # 텐서 변환
-    image_tensor = torch.as_tensor(image / 255.0, dtype=torch.float32).permute(2, 0, 1).unsqueeze(0).to(device)
+    # YOLO 추론
+    results = model(image, verbose=False, conf=conf_threshold, iou=0.4)[0]
     
-    with torch.no_grad():
-        predictions = model(image_tensor)
+    pred_boxes = results.boxes.xyxy.to(device) if results.boxes else torch.zeros(0,4).to(device)
+    pred_scores = results.boxes.conf.to(device) if results.boxes else torch.zeros(0).to(device)
+    
+    # Resize masks
+    if results.masks is not None:
+        pred_masks_resized = torch.nn.functional.interpolate(
+            results.masks.data.float().unsqueeze(1), 
+            size=(h, w), 
+            mode='bilinear', 
+            align_corners=False
+        ).squeeze(1).to(device)
+    else:
+        pred_masks_resized = torch.zeros((0, h, w)).to(device)
         
-    pred = predictions[0]
-    masks = (pred['masks'] > 0.5).squeeze(1).cpu().numpy()
-    boxes = pred['boxes'].cpu().numpy()
-    labels = pred['labels'].cpu().numpy()
-    scores = pred['scores'].cpu().numpy()
+    # FDI Numbering (2-Stage)
+    pred_labels_fdi = assign_fdi_labels(pred_boxes, pred_scores, w, h)
+    pred_labels_fdi = correct_fdi_numbers(pred_boxes, pred_labels_fdi)
+    
+    # Filter valid labels (> 0)
+    valid_mask = pred_labels_fdi > 0
+    pred_boxes = pred_boxes[valid_mask]
+    pred_masks_resized = pred_masks_resized[valid_mask]
+    pred_labels_fdi = pred_labels_fdi[valid_mask]
+    pred_scores = pred_scores[valid_mask]
+    
+    boxes_np = pred_boxes.cpu().numpy()
+    masks_np = (pred_masks_resized.cpu().numpy() > 0.5)
+    fdi_np = pred_labels_fdi.cpu().numpy()
+    scores_np = pred_scores.cpu().numpy()
     
     result = {
         'boxes': [],
@@ -62,16 +84,11 @@ def run_tooth_segmentation(image: np.ndarray, model, device, conf_threshold=0.5)
         'scores': []
     }
     
-    for i in range(len(boxes)):
-        if scores[i] < conf_threshold:
-            continue
-            
-        fdi_number = id_to_fdi.get(labels[i], "Unknown")
-        
-        result['boxes'].append(boxes[i])
-        result['masks'].append(masks[i])
-        result['fdi_labels'].append(fdi_number)
-        result['scores'].append(scores[i])
+    for i in range(len(boxes_np)):
+        result['boxes'].append(boxes_np[i])
+        result['masks'].append(masks_np[i])
+        result['fdi_labels'].append(int(fdi_np[i]))
+        result['scores'].append(scores_np[i])
         
     return result
 

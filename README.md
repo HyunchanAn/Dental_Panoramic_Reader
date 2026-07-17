@@ -1,6 +1,22 @@
-![Status](https://img.shields.io/badge/Status-v1.0%20Release-brightgreen) ![Python](https://img.shields.io/badge/Python-3.12%2B-blue) ![Backend](https://img.shields.io/badge/Backend-YOLOv8-red) ![UI](https://img.shields.io/badge/UI-Streamlit-orange) ![CI/CD Pipeline](https://img.shields.io/badge/CI%2FCD%20Pipeline-passing-brightgreen?logo=github)
+![Status](https://img.shields.io/badge/Status-v1.0%20Release-brightgreen "Status") ![Python](https://img.shields.io/badge/Python-3.12%2B-blue "Python") ![Backend](https://img.shields.io/badge/Backend-YOLOv8-red "Backend") ![UI](https://img.shields.io/badge/UI-Streamlit-orange "UI") ![CI/CD Pipeline](https://img.shields.io/badge/CI%2FCD%20Pipeline-passing-brightgreen?logo=github "CI/CD Pipeline")
 
 # Dental Panoramic Reader
+
+## 💻 Hardware & Infrastructure
+본 프로젝트의 개발과 학습은 서로 다른 두 환경에서 최적화되어 진행됩니다.
+
+- **Development / Inference Env**: Intel Core i5-14450HX, NVIDIA RTX 4060 Laptop (8GB VRAM), 16GB RAM
+- **Training Env (Main Workstation)**: AMD Ryzen 9 9900X, NVIDIA RTX 5080 (16GB VRAM), 64GB RAM
+
+### ⚡ E2E Benchmark
+- **Inference Latency**: ~2.5 seconds per panorama image (E2E full pipeline)
+- **VRAM Peak**: 동적 메모리 언로드 기법 적용으로 모든 모듈(YOLO, Segmentation, Classifier 등) 구동 시 최대 **~6.5GB VRAM** 피크 유지
+
+## ⚙️ 통합 환경 세팅
+14개의 서브모듈을 모두 구동하기 위해 필요한 가중치는 `setup_env.py`를 통해 자동으로 HuggingFace에서 다운로드할 수 있습니다:
+```bash
+python setup_env.py
+```
 
 파노라마 방사선 사진(Panoramic Radiograph)을 입력받아 화질 개선부터 치아 식별, 병소 탐지, 결손치 파악, 매복치 분석, 치조골 소실량 측정까지 아우르는 **End-to-End 통합 진단 애플리케이션**입니다.
 서로 다른 역할을 수행하는 인공지능 모듈(002, 003, 004, 008, 009, 010)을 서브모듈로 구성하고, 이를 하나의 일관된 진단 리포트로 통합(Orchestration)합니다.
