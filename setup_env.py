@@ -52,11 +52,9 @@ def download_models():
                 hf_hub_download(repo_id=repo, filename=filename, local_dir=dest_dir)
                 print(f"  -> Successfully downloaded to {dest_path}")
             except Exception as e:
-                print(f"  -> Failed to download {filename}: {e}")
-                print(f"  -> Creating placeholder for {filename}...")
-                # Create a placeholder for CI/CD or local test without HF credentials
-                with open(dest_path, "wb") as f:
-                    f.write(b"dummy_weights_for_testing")
+                raise RuntimeError(f"Critical Error: Failed to download {filename} from {repo}. "
+                                   f"Please check your network connection or HuggingFace token. "
+                                   f"Detailed error: {e}")
 
 if __name__ == "__main__":
     download_models()
