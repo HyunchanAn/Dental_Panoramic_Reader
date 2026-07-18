@@ -3,3 +3,11 @@
 models/
 __pycache__/
 .DS_Store
+
+# Security & Large Files
+data/
+*.zip
+*.rar
+*.pt
+*.pth
+.env
