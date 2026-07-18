@@ -20,8 +20,8 @@ st.sidebar.title("⚙️ Configuration")
 
 with st.sidebar.expander("Caries Detection Settings", expanded=True):
     model_source_c = st.radio("Caries 모델", ["기본 모델", "사용자 학습 모델"])
-    custom_model_c = st.text_input("모델 경로 (.pt)", "modules/Dental_002/models/best_refined.pt")
-    model_path_c = custom_model_c if model_source_c != "기본 모델" else "modules/Dental_002/models/best_refined.pt"
+    custom_model_c = st.text_input("모델 경로 (.onnx)", "modules/Dental_002/models/best.onnx")
+    model_path_c = custom_model_c if model_source_c != "기본 모델" else "modules/Dental_002/models/best.onnx"
     conf_threshold_c = st.slider("Confidence", 0.0, 1.0, 0.25)
     use_sahi_c = st.checkbox("Use SAHI", value=False)
     slice_size_c = st.select_slider("Slice Size", options=[320, 640, 800, 1024], value=640, disabled=not use_sahi_c)
@@ -63,8 +63,9 @@ def load_registry(model_path_c):
     c_path = model_path_c
     if not os.path.exists(c_path):
         try: 
-            c_path = hf_hub_download(repo_id="chemahc94/Dental_002", filename="best_refined.pt")
+            c_path = hf_hub_download(repo_id="chemahc94/Dental_002", filename="weights/best.onnx", token=True)
         except Exception as e:
+            print(f"HF Download Error for 002: {e}")
             pass # fallback
     caries_wrapper = CariesPredictorWrapper(model_path=c_path)
     registry.register_module("Dental_002_caries_detection", caries_wrapper)
@@ -74,10 +75,12 @@ def load_registry(model_path_c):
     repo_id = "chemahc94/Dental_003"  # Unified HF account
     def get_model_path(hf_name, local_path):
         if os.path.exists(local_path): return local_path
-        try: return hf_hub_download(repo_id=repo_id, filename=hf_name)
-        except Exception: return local_path
+        try: return hf_hub_download(repo_id=repo_id, filename=hf_name, token=True)
+        except Exception as e:
+            print(f"HF Download Error for {hf_name}: {e}")
+            return local_path
 
-    onnx_path = get_model_path("best.onnx", "modules/Dental_003/runs/detect/models/detector_train/weights/best.onnx")
+    onnx_path = get_model_path("weights/best.onnx", "modules/Dental_003/runs/detect/models/detector_train/weights/best.onnx")
     pt_path = get_model_path("best.pt", "modules/Dental_003/runs/detect/models/detector_train/weights/best.pt")
     final_weight = onnx_path if os.path.exists(onnx_path) else pt_path
     
@@ -85,7 +88,7 @@ def load_registry(model_path_c):
     registry.register_module("Dental_003_bone_loss_measurement", boneloss_wrapper)
     
     # Load Segmentation Wrapper (008)
-    seg_path = get_model_path("best.pt", "modules/Dental_008/models/best.pt")
+    seg_path = get_model_path("weights/best.onnx", "modules/Dental_008/models/best.onnx")
     seg_wrapper = SegmentationPredictorWrapper(model_path=seg_path)
     registry.register_module("Dental_008_segmentation", seg_wrapper)
     
@@ -104,13 +107,13 @@ def load_registry(model_path_c):
     
     # Load Periapical Predictor Wrapper (012)
     from modules.periapical_predictor import PeriapicalPredictorWrapper
-    periapical_path = get_model_path("best.pt", "modules/Dental_012/models/best.pt")
+    periapical_path = get_model_path("weights/best.onnx", "modules/Dental_012/models/best.onnx")
     periapical_wrapper = PeriapicalPredictorWrapper(model_path=periapical_path)
     registry.register_module("Dental_012_periapical", periapical_wrapper)
     
     # Load Restoration Predictor Wrapper (013)
     from modules.restoration_predictor import RestorationPredictorWrapper
-    restoration_path = get_model_path("best.pt", "modules/Dental_013/models/best.pt")
+    restoration_path = get_model_path("weights/best.onnx", "modules/Dental_013/models/best.onnx")
     restoration_wrapper = RestorationPredictorWrapper(model_path=restoration_path)
     registry.register_module("Dental_013_restoration", restoration_wrapper)
     
@@ -119,7 +122,7 @@ def load_registry(model_path_c):
     # 014 모델이 허깅페이스 계정 (chemahc94/Dental_014) 에 업로드되어 있다고 가정하고 연동
     if not os.path.exists(osteo_weight_path):
         try:
-            osteo_weight_path = hf_hub_download(repo_id="chemahc94/Dental_014", filename="best.pt")
+            osteo_weight_path = hf_hub_download(repo_id="chemahc94/Dental_014", filename="best.pt", token=True)
         except Exception:
             osteo_weight_path = "modules/Dental_014/weights/best.pt"
             

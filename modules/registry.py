@@ -1,3 +1,5 @@
+import torch
+import gc
 import traceback
 import logging
 import concurrent.futures
@@ -24,6 +26,8 @@ class PredictorRegistry:
                     res = self._predictors[name].predict(image, **kwargs)
                     res["status"] = "success"
                     results[name] = res
+                    torch.cuda.empty_cache()
+                    gc.collect()
                 except Exception as e:
                     logging.error(f"Error running base module {name}: {traceback.format_exc()}")
                     results[name] = {"module_name": name, "status": "error", "error_message": str(e)}
@@ -52,5 +56,7 @@ class PredictorRegistry:
             for future in concurrent.futures.as_completed(future_to_name):
                 name, res = future.result()
                 results[name] = res
+                torch.cuda.empty_cache()
+                gc.collect()
 
         return results

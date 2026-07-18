@@ -1,5 +1,5 @@
 streamlit
 opencv-python-headless
-# Install submodules locally
--e ./modules/Dental_002
--e ./modules/Dental_003
+onnxruntime-gpu
+huggingface_hub
+git+https://github.com/HyunchanAn/Dental_Core.git@master
