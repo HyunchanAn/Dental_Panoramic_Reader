@@ -6,3 +6,5 @@ torch
 torchvision
 ultralytics
 git+https://github.com/HyunchanAn/Dental_Core.git@master
+-e ./modules/Dental_002
+-e ./modules/Dental_003
