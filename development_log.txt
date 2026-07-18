@@ -34,3 +34,4 @@
 - Dental_014(Osteoporosis Screening) 신규 서브모듈 연동.
 - Dental_014의 극심한 과적합(Train 96.3% -> Val 58.0%) 문제를 해결하기 위해, 관제탑에서 직접 End-to-End Multi-task Architecture(Autoencoder 기반 Mask-Free 방식)로 모델 구조를 전면 재설계(Hotfix)하여 배포 및 뷰어 추론 로직 핫픽스 적용.
 - 레포지토리 루트 경로의 임시 테스트 파일들 청소 및 reports_archive 구버전 메모 폴더 정리 완료.
+- CI/CD Pipeline 통과 확인 및 최신 커밋 적용 완료. submodule 환경 복구 성공.
