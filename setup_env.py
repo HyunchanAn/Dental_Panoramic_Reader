@@ -5,31 +5,31 @@ from huggingface_hub import hf_hub_download
 # Mapping of required models and their HuggingFace / Direct paths
 MODELS = {
     "Dental_001": {
-        "cvm_model": ("live-track/dental-cvm", "best_cvm_model.pth"),
-        "yolo_model": ("live-track/dental-yolo", "yolov8m_custom.pt"),
-        "unet_model": ("live-track/dental-unet", "resnet50_unet.pth")
+        "cvm_model": ("chemahc94/dental-cvm", "best_cvm_model.pth"),
+        "yolo_model": ("chemahc94/dental-yolo", "yolov8m_custom.pt"),
+        "unet_model": ("chemahc94/dental-unet", "resnet50_unet.pth")
     },
     "Dental_002": {
-        "caries_model": ("live-track/dental-caries", "best_refined.pt")
+        "caries_model": ("chemahc94/dental-caries", "best_refined.pt")
     },
     "Dental_003": {
-        "boneloss_model": ("live-track/dental-boneloss", "best.pt"),
-        "classifier_model": ("live-track/dental-pano-classifier", "pano_classifier.pt")
+        "boneloss_model": ("chemahc94/dental-boneloss", "best.pt"),
+        "classifier_model": ("chemahc94/dental-pano-classifier", "pano_classifier.pt")
     },
     "Dental_004": {
-        "sr_model": ("live-track/dental-sr", "best_swinir.pth")
+        "sr_model": ("chemahc94/dental-sr", "best_swinir.pth")
     },
     "Dental_008": {
-        "seg_model": ("live-track/dental-seg", "yolov8m-seg.pt")
+        "seg_model": ("chemahc94/dental-seg", "yolov8m-seg.pt")
     },
     "Dental_011": {
-        "age_model": ("live-track/dental-age", "best_hybrid_age_model.pth")
+        "age_model": ("chemahc94/dental-age", "best_hybrid_age_model.pth")
     },
     "Dental_012": {
-        "periapical_model": ("live-track/dental-periapical", "best.pt")
+        "periapical_model": ("chemahc94/dental-periapical", "best.pt")
     },
     "Dental_013": {
-        "restoration_model": ("live-track/dental-restoration", "best.pt")
+        "restoration_model": ("chemahc94/dental-restoration", "best.pt")
     }
 }
 
