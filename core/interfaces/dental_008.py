@@ -5,7 +5,7 @@ import numpy as np
 
 # 파이썬 경로에 서브모듈 추가
 current_dir = os.path.dirname(os.path.abspath(__file__))
-module_path = os.path.abspath(os.path.join(current_dir, "../../modules/Dental_008/src"))
+module_path = os.path.abspath(os.path.join(current_dir, "../../../Dental_008/src"))
 if module_path not in sys.path:
     sys.path.append(module_path)
 
@@ -23,10 +23,10 @@ except ImportError:
 
 def init_008_model():
     """Dental_008 YOLOv8 모델을 초기화하여 반환합니다."""
-    ckpt_path = os.path.abspath(os.path.join(current_dir, "../../modules/Dental_008/yolov8m-seg.pt"))
+    ckpt_path = os.path.abspath(os.path.join(current_dir, "../../../Dental_008/yolov8m-seg.pt"))
     if not os.path.exists(ckpt_path):
         # Fallback to weights directory
-        ckpt_path = os.path.abspath(os.path.join(current_dir, "../../modules/Dental_008/weights/yolov8m-seg.pt"))
+        ckpt_path = os.path.abspath(os.path.join(current_dir, "../../../Dental_008/weights/yolov8m-seg.pt"))
         
     try:
         model = YOLO(ckpt_path)
@@ -102,7 +102,7 @@ def init_008_classifier():
     num_ftrs = model.fc.in_features
     model.fc = nn.Linear(num_ftrs, 1)
     
-    ckpt_path = os.path.abspath(os.path.join(current_dir, "../../modules/Dental_008/weights/pretrained/classifier_best.pth"))
+    ckpt_path = os.path.abspath(os.path.join(current_dir, "../../../Dental_008/weights/pretrained/classifier_best.pth"))
     if not os.path.exists(ckpt_path):
         try:
             print("Downloading deciduous classifier from Hugging Face...")

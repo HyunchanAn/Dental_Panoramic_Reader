@@ -126,5 +126,41 @@ class PanoramicPipeline:
         return result_report
 
     def _map_lesions_to_fdi(self, caries_data, tooth_roi_data):
-        from modules.Dental_Core.utils.geometry import map_lesions_to_fdi
-        return map_lesions_to_fdi(caries_data, tooth_roi_data)
+        # A simple implementation of map_lesions_to_fdi calculating intersection area
+        mapped = []
+        if not caries_data or 'boxes' not in caries_data or not caries_data['boxes']:
+            return mapped
+            
+        c_boxes = caries_data['boxes']
+        c_labels = caries_data['labels']
+        
+        t_boxes = tooth_roi_data.get('boxes', [])
+        t_fdi = tooth_roi_data.get('fdi_labels', [])
+        
+        for i, c_box in enumerate(c_boxes):
+            best_fdi = 'Unknown'
+            max_inter = 0
+            cx1, cy1, cx2, cy2 = c_box
+            c_area = (cx2 - cx1) * (cy2 - cy1)
+            
+            for j, t_box in enumerate(t_boxes):
+                tx1, ty1, tx2, ty2 = t_box
+                
+                ix1 = max(cx1, tx1)
+                iy1 = max(cy1, ty1)
+                ix2 = min(cx2, tx2)
+                iy2 = min(cy2, ty2)
+                
+                if ix1 < ix2 and iy1 < iy2:
+                    inter = (ix2 - ix1) * (iy2 - iy1)
+                    if inter > max_inter:
+                        max_inter = inter
+                        best_fdi = t_fdi[j]
+            
+            mapped.append({
+                'lesion_type': c_labels[i],
+                'fdi': best_fdi,
+                'box': c_box
+            })
+            
+        return mapped

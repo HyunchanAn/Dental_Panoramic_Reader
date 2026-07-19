@@ -6,7 +6,7 @@ import numpy as np
 
 # 파이썬 경로에 서브모듈 추가
 current_dir = os.path.dirname(os.path.abspath(__file__))
-module_path = os.path.abspath(os.path.join(current_dir, "../../modules/Dental_004/src"))
+module_path = os.path.abspath(os.path.join(current_dir, "../../../Dental_004/src"))
 if module_path not in sys.path:
     sys.path.append(module_path)
 
@@ -17,7 +17,7 @@ import yaml
 
 def init_004_model():
     """Dental_004 SwinIR 모델을 초기화하여 반환합니다."""
-    config_path = os.path.abspath(os.path.join(current_dir, "../../modules/Dental_004/config/base_config.yaml"))
+    config_path = os.path.abspath(os.path.join(current_dir, "../../../Dental_004/config/base_config.yaml"))
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
         
@@ -30,7 +30,7 @@ def init_004_model():
         window_size=config['model']['window_size']
     )
     
-    ckpt_path = os.path.abspath(os.path.join(current_dir, "../../modules/Dental_004/checkpoints/pano_swinir_epoch_100.pth"))
+    ckpt_path = os.path.abspath(os.path.join(current_dir, "../../../Dental_004/checkpoints/pano_swinir_epoch_100.pth"))
     if os.path.exists(ckpt_path):
         checkpoint = torch.load(ckpt_path, map_location='cpu')
         model.load_state_dict(checkpoint['model_state_dict'])

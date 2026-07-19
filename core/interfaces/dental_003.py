@@ -3,7 +3,7 @@ import sys
 import numpy as np
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
-module_path = os.path.abspath(os.path.join(current_dir, "../../modules/Dental_003"))
+module_path = os.path.abspath(os.path.join(current_dir, "../../../Dental_003"))
 if module_path not in sys.path:
     sys.path.append(module_path)
 
