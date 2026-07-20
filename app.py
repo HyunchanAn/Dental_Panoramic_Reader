@@ -3,13 +3,9 @@ from PIL import Image, ImageDraw, ImageFont
 import numpy as np
 import cv2
 import os
-import torch
 import gc
 from huggingface_hub import hf_hub_download
 import pandas as pd
-import torchvision.transforms as transforms
-import torchvision.models as vision_models
-import torch.nn as nn
 import onnxruntime as ort
 
 st.set_page_config(page_title="Integrated AI Panoramic Reader", layout="wide")
@@ -34,12 +30,7 @@ with st.sidebar.expander("Caries Detection Settings", expanded=True):
 with st.sidebar.expander("Bone Loss Settings", expanded=True):
     pixels_per_mm = st.number_input("Pixels per mm (Calibration)", min_value=0.1, value=10.0, step=0.1)
 
-import sys
-
-# Submodule 경로를 시스템 패키지 경로로 추가하여 pip install 없이도 로드 가능하도록 설정
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(BASE_DIR, "modules", "Dental_002", "src"))
-sys.path.insert(0, os.path.join(BASE_DIR, "modules", "Dental_003"))
 
 # Import registry and wrappers
 try:
@@ -63,32 +54,28 @@ def load_registry(model_path_c):
     c_path = model_path_c
     if not os.path.exists(c_path):
         try: 
-            c_path = hf_hub_download(repo_id="chemahc94/Dental_002", filename="weights/best.onnx", token=True)
+            c_path = hf_hub_download(repo_id="chemahc94/Dental-AI-Models", filename="Dental_002/best_refined.onnx", token=True)
         except Exception as e:
-            print(f"HF Download Error for 002: {e}")
-            pass # fallback
+            st.error(f"허깅페이스 인증 토큰 만료 또는 네트워크 장애로 가중치를 다운로드할 수 없습니다. (002): {e}")
+            st.stop()
     caries_wrapper = CariesPredictorWrapper(model_path=c_path)
     registry.register_module("Dental_002_caries_detection", caries_wrapper)
     
     # Load Bone Loss Wrapper
-    device = "cpu"
-    repo_id = "chemahc94/Dental_003"  # Unified HF account
-    def get_model_path(hf_name, local_path):
+    def get_model_path(repo_id, hf_name, local_path):
         if os.path.exists(local_path): return local_path
         try: return hf_hub_download(repo_id=repo_id, filename=hf_name, token=True)
         except Exception as e:
-            print(f"HF Download Error for {hf_name}: {e}")
-            return local_path
+            st.error(f"허깅페이스 인증 토큰 만료 또는 네트워크 장애로 가중치를 다운로드할 수 없습니다. ({hf_name}): {e}")
+            st.stop()
 
-    onnx_path = get_model_path("weights/best.onnx", "modules/Dental_003/runs/detect/models/detector_train/weights/best.onnx")
-    pt_path = get_model_path("best.pt", "modules/Dental_003/runs/detect/models/detector_train/weights/best.pt")
-    final_weight = onnx_path if os.path.exists(onnx_path) else pt_path
-    
-    boneloss_wrapper = BoneLossPredictorWrapper(final_weight, device)
+    boneloss_weight = get_model_path("chemahc94/Dental-AI-Models", "Dental_003/best.onnx", "modules/Dental_003/models/best.onnx")
+    sam_weight = get_model_path("chemahc94/Dental-AI-Models", "Dental_003/sam_vit_b_01ec64.onnx", "modules/Dental_003/models/sam_vit_b_01ec64.onnx")
+    boneloss_wrapper = BoneLossPredictorWrapper(boneloss_weight, sam_weight, "cuda")
     registry.register_module("Dental_003_bone_loss_measurement", boneloss_wrapper)
     
     # Load Segmentation Wrapper (008)
-    seg_path = get_model_path("weights/best.onnx", "modules/Dental_008/models/best.onnx")
+    seg_path = get_model_path("chemahc94/Dental-AI-Models", "Dental_008/yolov8m_best.onnx", "modules/Dental_008/models/best.onnx")
     seg_wrapper = SegmentationPredictorWrapper(model_path=seg_path)
     registry.register_module("Dental_008_segmentation", seg_wrapper)
     
@@ -101,31 +88,24 @@ def load_registry(model_path_c):
     registry.register_module("Dental_010_missing_tooth", missing_wrapper)
     
     # Load Age Predictor Wrapper (011)
-    age_path = get_model_path("best_hybrid_age_model.pth", "modules/Dental_011/src/weights/best_hybrid_age_model.pth")
+    age_path = get_model_path("chemahc94/Dental-AI-Models", "Dental_011/best_hybrid_age_model.onnx", "modules/Dental_011/models/best_hybrid_age_model.onnx")
     age_wrapper = AgePredictorWrapper(model_path=age_path)
     registry.register_module("Dental_011_age_estimation", age_wrapper)
     
     # Load Periapical Predictor Wrapper (012)
     from modules.periapical_predictor import PeriapicalPredictorWrapper
-    periapical_path = get_model_path("weights/best.onnx", "modules/Dental_012/models/best.onnx")
+    periapical_path = get_model_path("chemahc94/Dental_012", "best.onnx", "modules/Dental_012/models/best.onnx")
     periapical_wrapper = PeriapicalPredictorWrapper(model_path=periapical_path)
     registry.register_module("Dental_012_periapical", periapical_wrapper)
     
     # Load Restoration Predictor Wrapper (013)
     from modules.restoration_predictor import RestorationPredictorWrapper
-    restoration_path = get_model_path("weights/best.onnx", "modules/Dental_013/models/best.onnx")
+    restoration_path = get_model_path("chemahc94/Dental_013", "best_restoration_model.onnx", "modules/Dental_013/models/best.onnx")
     restoration_wrapper = RestorationPredictorWrapper(model_path=restoration_path)
     registry.register_module("Dental_013_restoration", restoration_wrapper)
     
-    # Load Osteoporosis Predictor Wrapper (014) - End-to-End Multitask Model
-    osteo_weight_path = get_model_path("best.pt", "modules/Dental_014/weights/best.pt")
-    # 014 모델이 허깅페이스 계정 (chemahc94/Dental_014) 에 업로드되어 있다고 가정하고 연동
-    if not os.path.exists(osteo_weight_path):
-        try:
-            osteo_weight_path = hf_hub_download(repo_id="chemahc94/Dental_014", filename="best.pt", token=True)
-        except Exception:
-            osteo_weight_path = "modules/Dental_014/weights/best.pt"
-            
+    # Load Osteoporosis Predictor Wrapper (014)
+    osteo_weight_path = get_model_path("chemahc94/Dental-AI-Models", "Dental_014/weights/best.onnx", "modules/Dental_014/models/best.onnx")
     osteo_wrapper = OsteoporosisPredictorWrapper(weight_path=osteo_weight_path)
     registry.register_module("Dental_014_osteoporosis", osteo_wrapper)
     
@@ -174,7 +154,7 @@ if uploaded_file is not None:
                     if show_xai_c:
                         temp_img = "temp_xai.png"
                         image.save(temp_img)
-                        viz, _ = res["detector_ref"].explain(temp_img)
+                        viz, _ = registry._predictors["Dental_002_caries_detection"].explain(temp_img)
                         if viz is not None: st.image(viz, caption="XAI Heatmap")
 
     with tab2:
@@ -211,7 +191,6 @@ if uploaded_file is not None:
         if st.button("통합 분석 실행 (Run All)"):
             st.info("전체 AI 모듈을 병렬 실행하여 다차원 진단 리포트를 생성합니다.")
             with st.spinner("통합 분석 중... (VRAM 최적화 적용)"):
-                torch.cuda.empty_cache()
                 gc.collect()
                 
                 all_modules = registry.get_available_modules()
@@ -221,7 +200,6 @@ if uploaded_file is not None:
                     use_sahi_c=use_sahi_c, slice_size_c=slice_size_c, overlap_ratio_c=overlap_ratio_c
                 )
                 
-                torch.cuda.empty_cache()
                 gc.collect()
                 
                 st.subheader("📊 통합 진단 리포트")

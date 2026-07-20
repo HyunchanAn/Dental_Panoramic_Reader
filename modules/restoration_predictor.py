@@ -1,50 +1,41 @@
 import os
-import sys
-import torch
-from torchvision import transforms, models
-import torch.nn as nn
-from PIL import Image
+import cv2
 import numpy as np
+import onnxruntime as ort
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 from .base_predictor import BasePanoramicPredictor
 
 class RestorationPredictorWrapper(BasePanoramicPredictor):
     def __init__(self, model_path: str):
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.model = None
+        self.model_path = model_path
+        self.session = None
         self.class_names = ['Crown', 'Filling', 'Implant', 'RCT', 'Other']  # Based on Dental_013 classes
-        self.load_model(model_path)
-        
-        # Transforms (must match the training transforms in Dental_013)
-        self.transform = transforms.Compose([
-            transforms.Resize((224, 224)),
-            transforms.ToTensor(),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-        ])
 
-    def load_model(self, model_path: str) -> None:
-        if os.path.exists(model_path):
-            try:
-                # Assuming EfficientNet-B0 was used in Dental_013
-                self.model = models.efficientnet_b0(weights=None)
-                num_ftrs = self.model.classifier[1].in_features
-                self.model.classifier[1] = nn.Linear(num_ftrs, len(self.class_names))
-                self.model.load_state_dict(torch.load(model_path, map_location=self.device))
-                self.model.to(self.device)
-                self.model.eval()
-            except Exception as e:
-                print(f"Error loading Dental_013 model: {e}")
-        else:
-            print(f"Warning: Model not found at {model_path}. Restoration predictor will not work.")
+    def load_model(self) -> None:
+        if self.session is None:
+            if os.path.exists(self.model_path):
+                try:
+                    providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
+                    self.session = ort.InferenceSession(self.model_path, providers=providers)
+                except Exception as e:
+                    print(f"Error loading Dental_013 ONNX model: {e}")
+            else:
+                print(f"Warning: Model not found at {self.model_path}. Restoration predictor will not work.")
+
+    def unload_model(self) -> None:
+        if self.session is not None:
+            del self.session
+            self.session = None
 
     def predict(self, image: np.ndarray, **kwargs) -> dict:
+        self.load_model()
+        
         """
         Input: RGB or BGR numpy image (full panorama)
         Kwargs: teeth_data (from Dental_008) containing bounding boxes of each tooth.
         Output: Dictionary mapping FDI to Restoration classes.
         """
-        if self.model is None:
+        if self.session is None:
             return {"module_name": "Dental_013_restoration", "error": "Model not loaded"}
 
         teeth_data = kwargs.get("teeth_data", [])
@@ -72,25 +63,37 @@ class RestorationPredictorWrapper(BasePanoramicPredictor):
             if tooth_crop.size == 0:
                 continue
                 
-            # Convert to PIL Image for torchvision transforms
-            if len(tooth_crop.shape) == 3 and tooth_crop.shape[2] == 3:
+            if tooth_crop.shape[-1] == 3:
                 # If BGR, convert to RGB
-                # Assuming input to pipeline is already handled, let's make sure it's RGB
-                # (pipeline.py usually passes current_img which is BGR if loaded by cv2)
-                # But here we just convert BGR to RGB to be safe
-                tooth_pil = Image.fromarray(tooth_crop[..., ::-1])
+                img_rgb = cv2.cvtColor(tooth_crop, cv2.COLOR_BGR2RGB)
             else:
-                tooth_pil = Image.fromarray(tooth_crop)
+                img_rgb = tooth_crop
                 
-            input_tensor = self.transform(tooth_pil).unsqueeze(0).to(self.device)
+            # Preprocess for ONNX (equivalent to torchvision transforms)
+            # 1. Resize to (224, 224)
+            img_resized = cv2.resize(img_rgb, (224, 224))
             
-            with torch.no_grad():
-                outputs = self.model(input_tensor)
-                probabilities = torch.nn.functional.softmax(outputs, dim=1)
-                top_p, top_class = probabilities.topk(1, dim=1)
-                
-                pred_idx = top_class.item()
-                pred_conf = top_p.item()
+            # 2. ToTensor: scale to [0, 1] and HWC -> CHW
+            img_scaled = img_resized.astype(np.float32) / 255.0
+            img_chw = np.transpose(img_scaled, (2, 0, 1))
+            
+            # 3. Normalize: mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+            mean = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape(3, 1, 1)
+            std = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape(3, 1, 1)
+            img_normalized = (img_chw - mean) / std
+            
+            # 4. Add batch dimension: [1, 3, 224, 224]
+            input_tensor = np.expand_dims(img_normalized, axis=0)
+            
+            input_name = self.session.get_inputs()[0].name
+            outputs = self.session.run(None, {input_name: input_tensor})[0]
+            
+            # Apply softmax
+            exp_scores = np.exp(outputs[0] - np.max(outputs[0]))
+            probabilities = exp_scores / np.sum(exp_scores)
+            
+            pred_idx = np.argmax(probabilities)
+            pred_conf = float(probabilities[pred_idx])
                 
             # If "Other" (e.g. natural tooth, post, etc.) is the highest, we might still include it,
             # but usually, we only report actual restorations with high confidence.

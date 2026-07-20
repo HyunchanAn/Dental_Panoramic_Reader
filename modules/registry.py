@@ -26,6 +26,8 @@ class PredictorRegistry:
                     res = self._predictors[name].predict(image, **kwargs)
                     res["status"] = "success"
                     results[name] = res
+                    if hasattr(self._predictors[name], "unload_model"):
+                        self._predictors[name].unload_model()
                     torch.cuda.empty_cache()
                     gc.collect()
                 except Exception as e:
@@ -45,6 +47,8 @@ class PredictorRegistry:
             try:
                 res = self._predictors[name].predict(image, **kwargs)
                 res["status"] = "success"
+                if hasattr(self._predictors[name], "unload_model"):
+                    self._predictors[name].unload_model()
                 return name, res
             except Exception as e:
                 logging.error(f"Error running derived module {name}: {traceback.format_exc()}")

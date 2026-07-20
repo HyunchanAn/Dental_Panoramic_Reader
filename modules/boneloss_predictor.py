@@ -1,4 +1,3 @@
-import sys
 import os
 import numpy as np
 import torch
@@ -7,40 +6,48 @@ import torchvision.models as vision_models
 import onnxruntime as ort
 from PIL import Image
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-boneloss_src_path = os.path.join(BASE_DIR, "modules", "Dental_003")
-if boneloss_src_path not in sys.path:
-    sys.path.insert(0, boneloss_src_path)
-
-from models.detector import ToothDetector
-from models.landmark import PerioLandmarkPredictor
-from utils.geometry import calculate_rbl
-from utils.calibration import CalibrationManager
+from modules.Dental_003.models.detector import ToothDetector
+from modules.Dental_003.models.landmark import PerioLandmarkPredictor
+from modules.Dental_003.utils.geometry import calculate_rbl
+from modules.Dental_003.utils.calibration import CalibrationManager
 from .base_predictor import BasePanoramicPredictor
 
 class BoneLossPredictorWrapper(BasePanoramicPredictor):
-    def __init__(self, detector_path: str, device: str, pixels_per_mm: float = 10.0):
+    def __init__(self, detector_path: str, sam_path: str, device: str, pixels_per_mm: float = 10.0):
+        self.detector_path = detector_path
+        self.sam_path = sam_path
         self.device = device
+        self.pixels_per_mm = pixels_per_mm
         self.calibrator = CalibrationManager(pixels_per_mm=pixels_per_mm)
         self.detector = None
         self.landmark = None
-        self.load_model(detector_path)
 
-    def load_model(self, detector_path: str) -> None:
-        try:
-            self.detector = ToothDetector(weights_path=detector_path, device=self.device)
-            sam_path = os.path.join(boneloss_src_path, "models", "sam_vit_b_01ec64.pth")
-            self.landmark = PerioLandmarkPredictor(device=self.device, checkpoint_path=sam_path)
-        except FileNotFoundError as e:
-            import logging
-            logging.warning(f"Dental_003 weights not found: {e}. Wrapper initialized in degraded mode.")
+    def load_model(self) -> None:
+        if self.detector is None or self.landmark is None:
+            try:
+                self.detector = ToothDetector(weights_path=self.detector_path, device=self.device)
+                self.landmark = PerioLandmarkPredictor(device=self.device, checkpoint_path=self.sam_path)
+            except FileNotFoundError as e:
+                import logging
+                logging.warning(f"Dental_003 weights not found: {e}. Wrapper initialized in degraded mode.")
+                self.detector = None
+                self.landmark = None
+                
+    def unload_model(self) -> None:
+        if self.detector is not None:
+            if hasattr(self.detector, 'session'): del self.detector.session
+            del self.detector
             self.detector = None
+        if self.landmark is not None:
+            if hasattr(self.landmark, 'predictor'): del self.landmark.predictor
+            del self.landmark
             self.landmark = None
 
     def update_pixels_per_mm(self, pixels_per_mm: float):
         self.calibrator = CalibrationManager(pixels_per_mm=pixels_per_mm)
 
     def predict(self, image: np.ndarray, **kwargs) -> dict:
+        self.load_model()
         if self.detector is None or self.landmark is None:
             return {
                 "module_name": "Dental_003_bone_loss_measurement",

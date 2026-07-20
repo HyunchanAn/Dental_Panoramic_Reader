@@ -9,17 +9,25 @@ from .base_predictor import BasePanoramicPredictor
 
 class PeriapicalPredictorWrapper(BasePanoramicPredictor):
     def __init__(self, model_path: str):
+        self.model_path = model_path
         self.model = None
-        self.load_model(model_path)
 
-    def load_model(self, model_path: str) -> None:
-        if os.path.exists(model_path):
-            # Load YOLOv11 model
-            self.model = YOLO(model_path)
-        else:
-            print(f"Warning: Model not found at {model_path}. Periapical predictor will not work.")
+    def load_model(self) -> None:
+        if self.model is None:
+            if os.path.exists(self.model_path):
+                # Load YOLO model (force task='detect' to avoid ONNX unpickling fallback errors)
+                self.model = YOLO(self.model_path, task='detect')
+            else:
+                print(f"Warning: Model not found at {self.model_path}. Periapical predictor will not work.")
+
+    def unload_model(self) -> None:
+        if self.model is not None:
+            del self.model
+            self.model = None
 
     def predict(self, image: np.ndarray, **kwargs) -> dict:
+        self.load_model()
+        
         """
         Input: RGB or BGR numpy image
         Output: Dictionary containing detected periapical lesions and matched FDI

@@ -1,28 +1,28 @@
-import sys
 import os
 import numpy as np
 import cv2
 import torch
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-seg_src_path = os.path.join(BASE_DIR, "modules", "Dental_008", "src")
-if seg_src_path not in sys.path:
-    sys.path.insert(0, seg_src_path)
-
 from ultralytics import YOLO
-from numbering.fdi_corrector import correct_fdi_numbers
+from modules.Dental_008.src.numbering.fdi_corrector import correct_fdi_numbers
 from .base_predictor import BasePanoramicPredictor
 
 class SegmentationPredictorWrapper(BasePanoramicPredictor):
     def __init__(self, model_path: str):
+        self.model_path = model_path
         self.model = None
-        self.load_model(model_path)
 
-    def load_model(self, model_path: str) -> None:
-        if os.path.exists(model_path):
-            self.model = YOLO(model_path)
-        else:
-            print(f"Warning: Model not found at {model_path}. Segmentation predictor will not work.")
+    def load_model(self) -> None:
+        if self.model is None:
+            if os.path.exists(self.model_path):
+                self.model = YOLO(self.model_path)
+            else:
+                print(f"Warning: Model not found at {self.model_path}. Segmentation predictor will not work.")
+                
+    def unload_model(self) -> None:
+        if self.model is not None:
+            del self.model
+            self.model = None
 
     def extract_contour(self, mask_tensor):
         mask_np = mask_tensor.cpu().numpy().astype(np.uint8)
@@ -32,6 +32,8 @@ class SegmentationPredictorWrapper(BasePanoramicPredictor):
         return max(contours, key=cv2.contourArea)
 
     def predict(self, image: np.ndarray, **kwargs) -> dict:
+        self.load_model()
+        
         """
         Input: RGB or BGR numpy image
         Output: Dictionaries of detected teeth
