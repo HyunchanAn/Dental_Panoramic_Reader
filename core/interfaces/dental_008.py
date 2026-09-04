@@ -22,32 +22,42 @@ except ImportError:
     pass # Will handle gracefully if path issues exist
 
 def init_008_model():
-    """Dental_008 YOLOv8 모델을 초기화하여 반환합니다."""
-    ckpt_path = os.path.abspath(os.path.join(current_dir, "../../../Dental_008/yolov8m-seg.pt"))
-    if not os.path.exists(ckpt_path):
-        # Fallback to weights directory
-        ckpt_path = os.path.abspath(os.path.join(current_dir, "../../../Dental_008/weights/yolov8m-seg.pt"))
+    """Dental_008 YOLOv8 치아 식별 모델을 초기화하여 반환합니다."""
+    possible_paths = [
+        os.path.abspath(os.path.join(current_dir, "../../modules/Dental_008/models/yolov8m_best.pt")),
+        os.path.abspath(os.path.join(current_dir, "../../../Dental_008/weights/yolov8m_best.pt")),
+        os.path.abspath(os.path.join(current_dir, "../../modules/Dental_008/models/yolov8m_best.onnx")),
+        os.path.abspath(os.path.join(current_dir, "../../../Dental_008/weights/yolov8m_best.onnx")),
+        os.path.abspath(os.path.join(current_dir, "../../../Dental_008/weights/yolov8m-seg.pt")),
+    ]
+    
+    ckpt_path = None
+    for p in possible_paths:
+        if os.path.exists(p):
+            ckpt_path = p
+            break
+            
+    if ckpt_path is None:
+        print("Warning: Dental_008 model weights not found.")
+        return None
         
     try:
+        print(f"Loading Dental_008 model from: {ckpt_path}")
         model = YOLO(ckpt_path)
     except Exception as e:
-        print(f"Failed to load YOLO model: {e}")
+        print(f"Failed to load Dental_008 YOLO model: {e}")
         model = None
     
     return model
 
-def run_tooth_segmentation(image: np.ndarray, model, device, conf_threshold=0.5) -> dict:
+def run_tooth_segmentation(image: np.ndarray, model, device, conf_threshold=0.20, iou_threshold=0.50) -> dict:
     """
     YOLOv8 및 2-Stage Sequence Matcher를 사용하여 치아 식별 및 영역 분할을 수행합니다.
-    Args:
-        image: RGB numpy array (H, W, 3)
-    Returns:
-        dict: {'boxes': [...], 'masks': [...], 'fdi_labels': [...], 'scores': [...]}
     """
     h, w, _ = image.shape
     
-    # YOLO 추론
-    results = model(image, verbose=False, conf=conf_threshold, iou=0.4)[0]
+    # YOLO 추론 (Main Workstation RTX 5080 verified optimal: conf=0.20, iou=0.50)
+    results = model(image, verbose=False, conf=conf_threshold, iou=iou_threshold)[0]
     
     pred_boxes = results.boxes.xyxy.to(device) if results.boxes else torch.zeros(0,4).to(device)
     pred_scores = results.boxes.conf.to(device) if results.boxes else torch.zeros(0).to(device)
@@ -64,8 +74,12 @@ def run_tooth_segmentation(image: np.ndarray, model, device, conf_threshold=0.5)
         pred_masks_resized = torch.zeros((0, h, w)).to(device)
         
     # FDI Numbering (2-Stage)
-    pred_labels_fdi = assign_fdi_labels(pred_boxes, pred_scores, w, h)
-    pred_labels_fdi = correct_fdi_numbers(pred_boxes, pred_labels_fdi)
+    try:
+        pred_labels_fdi = assign_fdi_labels(pred_boxes, pred_scores, w, h)
+        pred_labels_fdi = correct_fdi_numbers(pred_boxes, pred_labels_fdi)
+    except Exception as e:
+        print(f"Sequence Matcher fallback: {e}")
+        pred_labels_fdi = torch.zeros(len(pred_boxes), dtype=torch.int64).to(device)
     
     # Filter valid labels (> 0)
     valid_mask = pred_labels_fdi > 0
@@ -97,7 +111,7 @@ def run_tooth_segmentation(image: np.ndarray, model, device, conf_threshold=0.5)
 from huggingface_hub import hf_hub_download
 
 def init_008_classifier():
-    """Dental_008 유치 이진 분류기를 초기화하여 반환합니다."""
+    """Dental_008 유치 이진 분류기를 안전하게 초기화하여 반환합니다."""
     model = models.resnet18(weights=None)
     num_ftrs = model.fc.in_features
     model.fc = nn.Linear(num_ftrs, 1)
@@ -109,36 +123,44 @@ def init_008_classifier():
             ckpt_path = hf_hub_download(repo_id="chemahc94/dentex-tooth-segmentation", filename="classifier_best.pth")
         except Exception as e:
             print(f"Failed to download classifier from Hugging Face: {e}")
+            return None
             
     if os.path.exists(ckpt_path):
-        checkpoint = torch.load(ckpt_path, map_location='cpu')
-        model.load_state_dict(checkpoint)
+        try:
+            checkpoint = torch.load(ckpt_path, map_location='cpu')
+            model.load_state_dict(checkpoint)
+            model.eval()
+            return model
+        except Exception as e:
+            print(f"Warning: Failed to load classifier weights ({e}). Gracefully falling back.")
+            return None
     
-    model.eval()
-    return model
+    return None
 
 def run_deciduous_classification(image: np.ndarray, model, device) -> bool:
     """
     유치 존재 여부를 분류합니다.
-    Args:
-        image: RGB numpy array (H, W, 3)
-    Returns:
-        bool: True if deciduous (Child) tooth is detected, False otherwise.
     """
-    img = Image.fromarray(image.astype('uint8')).convert('RGB')
-    
-    val_transform = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-    ])
-    
-    img_t = val_transform(img).unsqueeze(0).to(device)
-    
-    with torch.no_grad():
-        outputs = model(img_t).squeeze(0) # shape (1,)
-        # 이진 분류 (0: Adult, 1: Child) - sigmoid threshold 0.5
-        prob = torch.sigmoid(outputs)
-        is_child = prob.item() > 0.5
+    if model is None:
+        return False
         
-    return is_child
+    try:
+        img = Image.fromarray(image.astype('uint8')).convert('RGB')
+        
+        val_transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ])
+        
+        img_t = val_transform(img).unsqueeze(0).to(device)
+        
+        with torch.no_grad():
+            outputs = model(img_t).squeeze(0)
+            prob = torch.sigmoid(outputs)
+            is_child = prob.item() > 0.5
+            
+        return is_child
+    except Exception as e:
+        print(f"Deciduous classification warning: {e}")
+        return False

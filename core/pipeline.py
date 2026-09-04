@@ -77,9 +77,10 @@ class PanoramicPipeline:
         tooth_roi_data = run_tooth_segmentation(current_img, model_008, self.device)
         result_report['008_tooth_data'] = tooth_roi_data
         
-        # 3. 002 우식 및 병소 탐지
+        # 3. 002 우식 및 병소 탐지 (2-Stage 치아 패치 연계)
         model_002 = self.manager.load_to_gpu("002")
-        caries_data = run_caries_detection(current_img, model_002)
+        tooth_boxes = tooth_roi_data.get('boxes', []) if tooth_roi_data else []
+        caries_data = run_caries_detection(current_img, model_002, tooth_boxes=tooth_boxes)
         
         # [정합 로직] 002의 BBox(병소)가 008의 BBox(치아) 영역에 포함/교차되는지 판별하여 FDI 매핑
         mapped_lesions = self._map_lesions_to_fdi(caries_data, tooth_roi_data)
