@@ -212,7 +212,10 @@ def health_check():
     path_008 = os.path.join(base_dir, "modules", "Dental_008", "models", "yolov8m_best.pt")
     path_002 = os.path.join(base_dir, "modules", "Dental_002", "models", "best_patch.onnx")
     path_012 = os.path.join(base_dir, "modules", "Dental_012", "models", "best.onnx")
-    path_013 = os.path.join(base_dir, "modules", "Dental_013", "models", "best_restoration_model.pth")
+    path_013_pth = os.path.join(base_dir, "modules", "Dental_013", "models", "best_restoration_model.pth")
+    path_013_onnx = os.path.join(base_dir, "modules", "Dental_013", "models", "best_restoration_model.onnx")
+    has_013 = os.path.exists(path_013_onnx) or os.path.exists(path_013_pth)
+    weights_013 = "best_restoration_model.onnx" if os.path.exists(path_013_onnx) else ("best_restoration_model.pth" if os.path.exists(path_013_pth) else "Not Loaded")
     
     modules_status = [
         {
@@ -259,9 +262,9 @@ def health_check():
             "id": "Dental_013",
             "name": "치과 수복물 분류",
             "type": "Restoration Classifier",
-            "status": "STANDBY" if not os.path.exists(path_013) else "ONLINE",
-            "weights": "best_restoration.pth" if os.path.exists(path_013) else "Not Loaded",
-            "version": "v1.0",
+            "status": "ONLINE" if has_013 else "STANDBY",
+            "weights": weights_013,
+            "version": "v1.0 (ONNX Serving)" if os.path.exists(path_013_onnx) else "v1.0",
         },
     ]
 

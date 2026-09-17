@@ -91,25 +91,22 @@ def run_caries_detection(image: np.ndarray, model, tooth_boxes: list = None, mar
                 if len(results) > 0:
                     res = results[0]
                     for rbox, rcls, rconf in zip(res.boxes.xyxy.cpu().numpy(), res.boxes.cls.cpu().numpy(), res.boxes.conf.cpu().numpy()):
-                        # 패치 내 상대 좌표 -> 파노라마 전역 좌표 정밀 역투영 (Inverse Mapping)
                         rx1, ry1, rx2, ry2 = rbox
-                        gx1 = float(max(0, px1 + rx1))
-                        gy1 = float(max(0, py1 + ry1))
-                        gx2 = float(min(w, px1 + rx2))
-                        gy2 = float(min(h, py1 + ry2))
-                        
+                        # 패치 내 512 상대 좌표 -> 원본 패치(pw, ph) 정규화 스케일링 및 전역 좌표 역투영
+                        rx1_scaled = (rx1 / 512.0) * pw
+                        ry1_scaled = (ry1 / 512.0) * ph
+                        rx2_scaled = (rx2 / 512.0) * pw
+                        ry2_scaled = (ry2 / 512.0) * ph
+
+                        gx1 = float(max(px1, px1 + rx1_scaled))
+                        gy1 = float(max(py1, py1 + ry1_scaled))
+                        gx2 = float(min(px2, px1 + rx2_scaled))
+                        gy2 = float(min(py2, py1 + ry2_scaled))
+
                         bw = gx2 - gx1
                         bh = gy2 - gy1
-                        
-                        # 해부학적 필터링: 우식 크기가 치아 크기의 100%를 초과하는 비정상 거대 오탐이나 미세 노이즈 배제
-                        if bw <= 4 or bh <= 4 or bw > (tw * 1.05) or bh > (th * 1.05):
+                        if bw <= 2 or bh <= 2:
                             continue
-                        
-                        # 치아 영역(px1, py1, px2, py2) 내부로 앵커링 클램핑
-                        gx1 = max(px1, gx1)
-                        gy1 = max(py1, gy1)
-                        gx2 = min(px2, gx2)
-                        gy2 = min(py2, gy2)
                         
                         boxes.append(np.array([gx1, gy1, gx2, gy2], dtype=np.float32))
                         labels.append(res.names[int(rcls)])
