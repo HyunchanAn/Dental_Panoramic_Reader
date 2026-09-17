@@ -90,14 +90,30 @@ def run_caries_detection(image: np.ndarray, model, tooth_boxes: list = None, mar
                 results = model.predict(source=patch_clahe, imgsz=512, conf=0.20, iou=0.45, verbose=False)
                 if len(results) > 0:
                     res = results[0]
+                    # 치아 바운딩 박스 기준 5% 안전 마진 계산 (인접면 우식 수용 및 치관 이탈 방어)
+                    tx1, ty1, tx2, ty2 = map(float, tbox[:4])
+                    tw = tx2 - tx1
+                    th = ty2 - ty1
+                    margin_x = tw * 0.05
+                    margin_y = th * 0.05
+                    min_gx = max(0.0, tx1 - margin_x)
+                    max_gx = min(float(img_w), tx2 + margin_x)
+                    min_gy = max(0.0, ty1 - margin_y)
+                    max_gy = min(float(img_h), ty2 + margin_y)
+
                     for rbox, rcls, rconf in zip(res.boxes.xyxy.cpu().numpy(), res.boxes.cls.cpu().numpy(), res.boxes.conf.cpu().numpy()):
-                        rx1, ry1, rx2, ry2 = rbox
-                        # Ultralytics model.predict는 이미 res.orig_shape(ph, pw) 해상도로 역투영된 좌표를 반환합니다.
-                        # 따라서 이중 스케일(/512.0 * pw) 없이 패치 시작점(px1, py1)을 가산하고 치아 BBox 경계선으로 클램핑합니다.
-                        gx1 = float(max(px1, min(px2, px1 + rx1)))
-                        gy1 = float(max(py1, min(py2, py1 + ry1)))
-                        gx2 = float(max(px1, min(px2, px1 + rx2)))
-                        gy2 = float(max(py1, min(py2, py1 + ry2)))
+                        rx1, ry1, rx2, ry2 = map(float, rbox)
+
+                        # [ONNX 가드] 모델 출력이 orig_shape가 아닌 512 좌표인 경우 자동 보정하지 않고 즉각 skip
+                        if rx2 > pw * 1.05 or ry2 > ph * 1.05:
+                            print(f"[Dental_002 Guard] Detected non-orig_shape coordinates (rx2={rx2:.1f} > pw={pw}, ry2={ry2:.1f} > ph={ph}). Skipping patch detection.")
+                            continue
+
+                        # 치아 바운딩 박스 + 5% 안전 마진 영역으로 클램핑
+                        gx1 = float(max(min_gx, min(max_gx, px1 + rx1)))
+                        gy1 = float(max(min_gy, min(max_gy, py1 + ry1)))
+                        gx2 = float(max(min_gx, min(max_gx, px1 + rx2)))
+                        gy2 = float(max(min_gy, min(max_gy, py1 + ry2)))
 
                         bw = gx2 - gx1
                         bh = gy2 - gy1
