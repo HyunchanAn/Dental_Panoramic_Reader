@@ -92,16 +92,12 @@ def run_caries_detection(image: np.ndarray, model, tooth_boxes: list = None, mar
                     res = results[0]
                     for rbox, rcls, rconf in zip(res.boxes.xyxy.cpu().numpy(), res.boxes.cls.cpu().numpy(), res.boxes.conf.cpu().numpy()):
                         rx1, ry1, rx2, ry2 = rbox
-                        # 패치 내 512 상대 좌표 -> 원본 패치(pw, ph) 정규화 스케일링 및 전역 좌표 역투영
-                        rx1_scaled = (rx1 / 512.0) * pw
-                        ry1_scaled = (ry1 / 512.0) * ph
-                        rx2_scaled = (rx2 / 512.0) * pw
-                        ry2_scaled = (ry2 / 512.0) * ph
-
-                        gx1 = float(max(px1, px1 + rx1_scaled))
-                        gy1 = float(max(py1, py1 + ry1_scaled))
-                        gx2 = float(min(px2, px1 + rx2_scaled))
-                        gy2 = float(min(py2, py1 + ry2_scaled))
+                        # Ultralytics model.predict는 이미 res.orig_shape(ph, pw) 해상도로 역투영된 좌표를 반환합니다.
+                        # 따라서 이중 스케일(/512.0 * pw) 없이 패치 시작점(px1, py1)을 가산하고 치아 BBox 경계선으로 클램핑합니다.
+                        gx1 = float(max(px1, min(px2, px1 + rx1)))
+                        gy1 = float(max(py1, min(py2, py1 + ry1)))
+                        gx2 = float(max(px1, min(px2, px1 + rx2)))
+                        gy2 = float(max(py1, min(py2, py1 + ry2)))
 
                         bw = gx2 - gx1
                         bh = gy2 - gy1

@@ -158,6 +158,66 @@ def format_to_ssot_report(raw_report: Dict[str, Any], img_w: int, img_h: int, fi
     boxes = tooth_roi.get('boxes', []) if tooth_roi else []
     missing_analysis = verify_missing_teeth(fdi_labels, boxes, img_w, img_h, midline_x)
 
+    # 5. Clinical Synthesis & Odontogram Status Synthesis (32 teeth)
+    all_32_teeth = [
+        18, 17, 16, 15, 14, 13, 12, 11,
+        21, 22, 23, 24, 25, 26, 27, 28,
+        48, 47, 46, 45, 44, 43, 42, 41,
+        31, 32, 33, 34, 35, 36, 37, 38,
+    ]
+    verified_missing_set = set(missing_analysis.get('verified_missing', []))
+    periapical_fdis = {p.get('toothNumber') for p in periapical_list if p.get('toothNumber')}
+    caries_fdi_map = {c.get('toothNumber'): c for c in caries_list if c.get('toothNumber')}
+    bone_loss_fdis = {b.get('toothNumber') for b in bone_loss_list if b.get('toothNumber')}
+
+    odontogram = {}
+    treatment_queue = []
+
+    for fdi in all_32_teeth:
+        if fdi in verified_missing_set:
+            odontogram[str(fdi)] = {"status": "Missing", "label": "Missing"}
+        elif fdi in periapical_fdis:
+            odontogram[str(fdi)] = {"status": "Periapical", "label": "Periapical"}
+            treatment_queue.append({
+                "priority": "EMERGENT",
+                "fdi": fdi,
+                "condition": "Periapical Lesion",
+                "recommendation": f"FDI #{fdi} 치근단 병소: 정밀 방사선 및 근관 치료(Endodontics) 우선 고려 요망."
+            })
+        elif fdi in caries_fdi_map:
+            conf = caries_fdi_map[fdi].get('confidence', 0.8)
+            status_str = "Caries" if conf >= 0.45 else "Suspected"
+            odontogram[str(fdi)] = {"status": status_str, "label": status_str}
+            if conf >= 0.45:
+                treatment_queue.append({
+                    "priority": "HIGH",
+                    "fdi": fdi,
+                    "condition": "Dental Caries",
+                    "recommendation": f"FDI #{fdi} 치아 우식증: 와동 형성 및 보철/수복(Restoration) 치료 권고."
+                })
+        elif fdi in bone_loss_fdis:
+            odontogram[str(fdi)] = {"status": "BoneLoss", "label": "BoneLoss"}
+            treatment_queue.append({
+                "priority": "MODERATE",
+                "fdi": fdi,
+                "condition": "Alveolar Bone Loss",
+                "recommendation": f"FDI #{fdi} 치조골 흡수: 치주낭 계측 및 치근활택술/치주치료 권고."
+            })
+        else:
+            odontogram[str(fdi)] = {"status": "Sound", "label": "Sound"}
+
+    treatment_queue.append({
+        "priority": "PREVENTIVE",
+        "fdi": None,
+        "condition": "General Periodontal Care",
+        "recommendation": "정기 치주 스케일링 및 6개월 단위 임상 파노라마 추적 관찰 추천."
+    })
+
+    clinical_synthesis = {
+        "treatmentQueue": treatment_queue,
+        "odontogram": odontogram
+    }
+
     summary_parts = []
     if caries_list:
         summary_parts.append(f"치아 우식증 및 병소 {len(caries_list)}건 탐지.")
@@ -188,7 +248,9 @@ def format_to_ssot_report(raw_report: Dict[str, Any], img_w: int, img_h: int, fi
             "osteoporosisRisk": {
                 "score": 0.15,
                 "category": "LOW",
+                "status": "MOCK_SCREENING",
             },
+            "clinicalSynthesis": clinical_synthesis,
         },
         "summary": summary_text,
     }
@@ -259,12 +321,28 @@ def health_check():
             "version": "v1.0",
         },
         {
+            "id": "Dental_009",
+            "name": "매복 제3대구치 난이도 분석",
+            "type": "Winter's Classification",
+            "status": "ONLINE",
+            "weights": "Heuristic Geometry",
+            "version": "v1.0 (Winter/Pell-Gregory)",
+        },
+        {
             "id": "Dental_013",
             "name": "치과 수복물 분류",
-            "type": "Restoration Classifier",
+            "type": "YOLOv8 Segmentation",
             "status": "ONLINE" if has_013 else "STANDBY",
             "weights": weights_013,
-            "version": "v1.0 (ONNX Serving)" if os.path.exists(path_013_onnx) else "v1.0",
+            "version": "v1.0 (YOLO ONNX)" if os.path.exists(path_013_onnx) else "v1.0",
+        },
+        {
+            "id": "Dental_014",
+            "name": "골다공증 위험도 스크리닝",
+            "type": "Mandibular Cortex Index (MOCK)",
+            "status": "MOCK",
+            "weights": "Mock Baseline Threshold",
+            "version": "v0.5 (MOCK)",
         },
     ]
 
