@@ -93,10 +93,23 @@ def run_caries_detection(image: np.ndarray, model, tooth_boxes: list = None, mar
                     for rbox, rcls, rconf in zip(res.boxes.xyxy.cpu().numpy(), res.boxes.cls.cpu().numpy(), res.boxes.conf.cpu().numpy()):
                         # 패치 내 상대 좌표 -> 파노라마 전역 좌표 정밀 역투영 (Inverse Mapping)
                         rx1, ry1, rx2, ry2 = rbox
-                        gx1 = px1 + rx1
-                        gy1 = py1 + ry1
-                        gx2 = px1 + rx2
-                        gy2 = py1 + ry2
+                        gx1 = float(max(0, px1 + rx1))
+                        gy1 = float(max(0, py1 + ry1))
+                        gx2 = float(min(w, px1 + rx2))
+                        gy2 = float(min(h, py1 + ry2))
+                        
+                        bw = gx2 - gx1
+                        bh = gy2 - gy1
+                        
+                        # 해부학적 필터링: 우식 크기가 치아 크기의 100%를 초과하는 비정상 거대 오탐이나 미세 노이즈 배제
+                        if bw <= 4 or bh <= 4 or bw > (tw * 1.05) or bh > (th * 1.05):
+                            continue
+                        
+                        # 치아 영역(px1, py1, px2, py2) 내부로 앵커링 클램핑
+                        gx1 = max(px1, gx1)
+                        gy1 = max(py1, gy1)
+                        gx2 = min(px2, gx2)
+                        gy2 = min(py2, gy2)
                         
                         boxes.append(np.array([gx1, gy1, gx2, gy2], dtype=np.float32))
                         labels.append(res.names[int(rcls)])
