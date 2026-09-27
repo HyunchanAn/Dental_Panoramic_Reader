@@ -24,9 +24,23 @@ def verify_missing_teeth(
     
     if not boxes or len(boxes) == 0:
         return {
-            "verified_missing": candidate_missing,
-            "uncertain_missing": [],
-            "details": []
+            "verified_missing": [],
+            "uncertain_missing": candidate_missing,
+            "details": [{
+                "status": "UNVERIFIED_NO_TEETH_DETECTED",
+                "reason": "No teeth detected in image. Missing teeth analysis requires teeth boundaries."
+            }]
+        }
+
+    # Minimum detected teeth guard: If fewer than 8 teeth detected, defer verified missing
+    if len(boxes) < 8:
+        return {
+            "verified_missing": [],
+            "uncertain_missing": candidate_missing,
+            "details": [{
+                "status": "UNVERIFIED_INSUFFICIENT_TEETH",
+                "reason": f"Only {len(boxes)} teeth detected (threshold: 8). Risk of image truncation or severe occlusion."
+            }]
         }
         
     # FDI별 치아 box 매핑
