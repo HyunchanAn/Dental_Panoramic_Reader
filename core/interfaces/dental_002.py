@@ -91,15 +91,12 @@ def run_caries_detection(image: np.ndarray, model, tooth_boxes: list = None, mar
                 if len(results) > 0:
                     res = results[0]
                     # 치아 바운딩 박스 기준 5% 안전 마진 계산 (인접면 우식 수용 및 치관 이탈 방어)
-                    tx1, ty1, tx2, ty2 = map(float, tbox[:4])
-                    tw = tx2 - tx1
-                    th = ty2 - ty1
                     margin_x = tw * 0.05
                     margin_y = th * 0.05
                     min_gx = max(0.0, tx1 - margin_x)
-                    max_gx = min(float(img_w), tx2 + margin_x)
+                    max_gx = min(float(w), tx2 + margin_x)
                     min_gy = max(0.0, ty1 - margin_y)
-                    max_gy = min(float(img_h), ty2 + margin_y)
+                    max_gy = min(float(h), ty2 + margin_y)
 
                     for rbox, rcls, rconf in zip(res.boxes.xyxy.cpu().numpy(), res.boxes.cls.cpu().numpy(), res.boxes.conf.cpu().numpy()):
                         rx1, ry1, rx2, ry2 = map(float, rbox)

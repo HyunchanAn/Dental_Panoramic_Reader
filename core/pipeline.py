@@ -122,6 +122,55 @@ class PanoramicPipeline:
                     
             restoration_data = model_013.predict(current_img, teeth_data=formatted_teeth_data_013)
             result_report['013_restoration'] = restoration_data
+
+        # 7. 009 매복 제3대구치 분석 (Winter's Classification & Impaction)
+        try:
+            from modules.Dental_009.src.analyzer import ImpactedToothAnalyzer
+            analyzer_009 = ImpactedToothAnalyzer()
+            impacted_results = []
+            
+            # 3rd molars and adjacent 2nd molars mapping
+            pairs = [(18, 17), (28, 27), (38, 37), (48, 47)]
+            tooth_dict = {}
+            if tooth_roi_data and 'fdi_labels' in tooth_roi_data and 'boxes' in tooth_roi_data:
+                for fdi, box in zip(tooth_roi_data['fdi_labels'], tooth_roi_data['boxes']):
+                    tooth_dict[fdi] = box
+
+            for m3_fdi, m2_fdi in pairs:
+                if m3_fdi in tooth_dict:
+                    m3_box = tooth_dict[m3_fdi]
+                    m2_box = tooth_dict.get(m2_fdi)
+                    
+                    # Synthesize box into contour approximation for geometric axis calculation
+                    m3_pts = np.array([
+                        [m3_box[0], m3_box[1]],
+                        [m3_box[2], m3_box[1]],
+                        [m3_box[2], m3_box[3]],
+                        [m3_box[0], m3_box[3]]
+                    ], dtype=np.int32)
+                    
+                    if m2_box is not None:
+                        m2_pts = np.array([
+                            [m2_box[0], m2_box[1]],
+                            [m2_box[2], m2_box[1]],
+                            [m2_box[2], m2_box[3]],
+                            [m2_box[0], m2_box[3]]
+                        ], dtype=np.int32)
+                        res = analyzer_009.analyze_impacted_tooth(m3_pts, m3_fdi, m2_pts)
+                    else:
+                        res = {
+                            "fdi": m3_fdi,
+                            "angle_diff": 0.0,
+                            "winters_class": "Isolated / Impacted",
+                            "eruption_status": "Fully Impacted"
+                        }
+                    res['box'] = m3_box.tolist() if hasattr(m3_box, 'tolist') else list(m3_box)
+                    impacted_results.append(res)
+                    
+            result_report['009_impacted'] = impacted_results
+        except Exception as e:
+            print(f"Dental_009 impaction analysis warning: {e}")
+            result_report['009_impacted'] = []
             
         # GPU 캐시 비우기
         self.manager.clear_cache()

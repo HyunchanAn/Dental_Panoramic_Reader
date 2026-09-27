@@ -146,27 +146,79 @@ def format_to_ssot_report(
 
     # 3. Periapical Lesions (Dental_012)
     if '012_periapical' in raw_report and raw_report['012_periapical']:
-        p_data = raw_report['012_periapical']
-        if isinstance(p_data, list):
-            for item in p_data:
-                box = item.get('bbox', [0, 0, 0, 0])
-                norm_box = normalize_bbox(box, img_w, img_h)
-                periapical_list.append({
-                    "x": norm_box["x"],
-                    "y": norm_box["y"],
-                    "w": norm_box["w"],
-                    "h": norm_box["h"],
-                    "confidence": item.get('score', 0.80),
-                    "label": "Periapical Lesion",
-                    "toothNumber": item.get('fdi', None),
-                })
+        p_raw = raw_report['012_periapical']
+        p_items = p_raw.get('lesions', []) if isinstance(p_raw, dict) else (p_raw if isinstance(p_raw, list) else [])
+        for item in p_items:
+            box = item.get('bbox', [0, 0, 0, 0])
+            norm_box = normalize_bbox(box, img_w, img_h)
+            periapical_list.append({
+                "x": norm_box["x"],
+                "y": norm_box["y"],
+                "w": norm_box["w"],
+                "h": norm_box["h"],
+                "confidence": item.get('confidence', item.get('score', 0.80)),
+                "label": "Periapical Lesion",
+                "toothNumber": item.get('fdi', None),
+            })
 
-    # 4. Missing Teeth Verification (Dental_010 Gap Ratio Heuristic)
+    # 4. Detected Teeth (Dental_008) - 32 Tooth BBoxes & FDI Labels
+    teeth_list = []
     fdi_labels = tooth_roi.get('fdi_labels', []) if tooth_roi else []
     boxes = tooth_roi.get('boxes', []) if tooth_roi else []
+    uncertain_flags = tooth_roi.get('uncertain', [False] * len(boxes)) if tooth_roi else []
+    scores = tooth_roi.get('scores', [0.9] * len(boxes)) if tooth_roi else []
+
+    for fdi, box, unc, sc in zip(fdi_labels, boxes, uncertain_flags, scores):
+        norm_box = normalize_bbox(box, img_w, img_h)
+        teeth_list.append({
+            "toothNumber": int(fdi),
+            "x": norm_box["x"],
+            "y": norm_box["y"],
+            "w": norm_box["w"],
+            "h": norm_box["h"],
+            "confidence": round(float(sc), 2),
+            "uncertain": bool(unc),
+        })
+
+    # 5. Restorations & Prosthetics (Dental_013)
+    restorations_list = []
+    if '013_restoration' in raw_report and raw_report['013_restoration']:
+        r_raw = raw_report['013_restoration']
+        r_items = r_raw.get('results', []) if isinstance(r_raw, dict) else (r_raw if isinstance(r_raw, list) else [])
+        for item in r_items:
+            box = item.get('bbox', item.get('box', [0, 0, 0, 0]))
+            norm_box = normalize_bbox(box, img_w, img_h)
+            restorations_list.append({
+                "toothNumber": item.get('fdi', None),
+                "type": item.get('type', item.get('class_name', 'Restoration')),
+                "confidence": round(float(item.get('confidence', item.get('score', 0.85))), 2),
+                "x": norm_box["x"],
+                "y": norm_box["y"],
+                "w": norm_box["w"],
+                "h": norm_box["h"],
+            })
+
+    # 6. Impacted Teeth (Dental_009)
+    impacted_list = []
+    if '009_impacted' in raw_report and raw_report['009_impacted']:
+        for item in raw_report['009_impacted']:
+            box = item.get('box', [0, 0, 0, 0])
+            norm_box = normalize_bbox(box, img_w, img_h)
+            impacted_list.append({
+                "toothNumber": item.get('fdi'),
+                "wintersClass": item.get('winters_class', 'Impacted'),
+                "eruptionStatus": item.get('eruption_status', 'Fully Impacted'),
+                "angleDiff": item.get('angle_diff', 0.0),
+                "x": norm_box["x"],
+                "y": norm_box["y"],
+                "w": norm_box["w"],
+                "h": norm_box["h"],
+            })
+
+    # 7. Missing Teeth Verification (Dental_010 Gap Ratio Heuristic)
     missing_analysis = verify_missing_teeth(fdi_labels, boxes, img_w, img_h, midline_x)
 
-    # 5. Clinical Synthesis & Odontogram Status Synthesis (32 teeth)
+    # 8. Clinical Synthesis & Odontogram Status Synthesis (32 teeth)
     all_32_teeth = [
         18, 17, 16, 15, 14, 13, 12, 11,
         21, 22, 23, 24, 25, 26, 27, 28,
@@ -177,6 +229,8 @@ def format_to_ssot_report(
     periapical_fdis = {p.get('toothNumber') for p in periapical_list if p.get('toothNumber')}
     caries_fdi_map = {c.get('toothNumber'): c for c in caries_list if c.get('toothNumber')}
     bone_loss_fdis = {b.get('toothNumber') for b in bone_loss_list if b.get('toothNumber')}
+    restoration_fdis = {r.get('toothNumber') for r in restorations_list if r.get('toothNumber')}
+    impacted_fdis = {imp.get('toothNumber') for imp in impacted_list if imp.get('toothNumber')}
 
     odontogram = {}
     treatment_queue = []
@@ -203,6 +257,16 @@ def format_to_ssot_report(
                     "condition": "Dental Caries",
                     "recommendation": f"FDI #{fdi} 치아 우식증: 와동 형성 및 보철/수복(Restoration) 치료 권고."
                 })
+        elif fdi in impacted_fdis:
+            odontogram[str(fdi)] = {"status": "Impacted", "label": "Impacted"}
+            treatment_queue.append({
+                "priority": "HIGH",
+                "fdi": fdi,
+                "condition": "Impacted Tooth",
+                "recommendation": f"FDI #{fdi} 제3대구치 매복: 인접 치근 흡수 및 지치주위염 예방을 위한 외과적 발치 검토."
+            })
+        elif fdi in restoration_fdis:
+            odontogram[str(fdi)] = {"status": "Restored", "label": "Restored"}
         elif fdi in bone_loss_fdis:
             odontogram[str(fdi)] = {"status": "BoneLoss", "label": "BoneLoss"}
             treatment_queue.append({
@@ -227,14 +291,22 @@ def format_to_ssot_report(
     }
 
     summary_parts = []
+    if teeth_list:
+        summary_parts.append(f"치아 {len(teeth_list)}개 식별 완료.")
+    if impacted_list:
+        summary_parts.append(f"매복치 {len(impacted_list)}개 ({[i['toothNumber'] for i in impacted_list]}) 감지.")
+    if restorations_list:
+        summary_parts.append(f"수복물/보철물 {len(restorations_list)}건 확인.")
     if caries_list:
-        summary_parts.append(f"치아 우식증 및 병소 {len(caries_list)}건 탐지.")
+        summary_parts.append(f"치아 우식증 {len(caries_list)}건 탐지.")
+    if periapical_list:
+        summary_parts.append(f"치근단 병소 {len(periapical_list)}건 탐지.")
     if bone_loss_list:
-        summary_parts.append(f"치조골 소실 부위 {len(bone_loss_list)}건 계측 완료.")
+        summary_parts.append(f"치조골 소실 {len(bone_loss_list)}건 계측.")
     if missing_analysis['verified_missing']:
-        summary_parts.append(f"결손치(확정) {len(missing_analysis['verified_missing'])}개 식별 ({missing_analysis['verified_missing']}).")
+        summary_parts.append(f"결손치(확정) {len(missing_analysis['verified_missing'])}개 ({missing_analysis['verified_missing']}).")
     if missing_analysis['uncertain_missing']:
-        summary_parts.append(f"결손치(유보/최후방) {len(missing_analysis['uncertain_missing'])}개 격리 처리.")
+        summary_parts.append(f"결손치(유보/최후방) {len(missing_analysis['uncertain_missing'])}개 격리.")
 
     summary_text = " ".join(summary_parts) if summary_parts else "분석 결과 특이 소견이 없습니다."
 
@@ -251,9 +323,12 @@ def format_to_ssot_report(
             "preprocessing_id": preprocessing_id,
         },
         "findings": {
+            "teeth": teeth_list,
             "caries": caries_list,
             "boneLoss": bone_loss_list,
             "periapicalLesions": periapical_list,
+            "restorations": restorations_list,
+            "impactedTeeth": impacted_list,
             "missingTeeth": missing_analysis,
             "osteoporosisRisk": {
                 "score": 0.15,
@@ -371,7 +446,7 @@ def infer_panoramic(
     file: UploadFile = File(...),
     use_004: bool = Query(False, description="Enable Dental_004 Super-Resolution preprocessing"),
 ):
-    if not file.content_type.startswith("image/"):
+    if file.content_type and not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="Invalid file type. Only image files are supported.")
 
     try:
