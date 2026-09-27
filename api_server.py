@@ -1,6 +1,7 @@
 import os
 import io
 import time
+import hashlib
 import numpy as np
 from PIL import Image
 from typing import Dict, Any, List, Optional
@@ -68,7 +69,14 @@ def calculate_dynamic_midline(tooth_roi_data: Dict[str, Any], default_w: int) ->
     return default_w / 2.0
 
 
-def format_to_ssot_report(raw_report: Dict[str, Any], img_w: int, img_h: int, filename: str) -> Dict[str, Any]:
+def format_to_ssot_report(
+    raw_report: Dict[str, Any], 
+    img_w: int, 
+    img_h: int, 
+    filename: str,
+    image_hash: str = "",
+    preprocessing_id: str = "PRE-VISTA-AUTO-LETTERBOX-v1"
+) -> Dict[str, Any]:
     caries_list = []
     bone_loss_list = []
     periapical_list = []
@@ -239,6 +247,8 @@ def format_to_ssot_report(raw_report: Dict[str, Any], img_w: int, img_h: int, fi
             "width": img_w,
             "height": img_h,
             "midline_x": round(midline_x, 1),
+            "sha256_hash": image_hash,
+            "preprocessing_id": preprocessing_id,
         },
         "findings": {
             "caries": caries_list,
@@ -366,6 +376,7 @@ def infer_panoramic(
 
     try:
         contents = file.file.read()
+        image_hash = hashlib.sha256(contents).hexdigest()
         image_pil = Image.open(io.BytesIO(contents)).convert("RGB")
         img_np = np.array(image_pil)
         img_h, img_w = img_np.shape[:2]
@@ -373,7 +384,13 @@ def infer_panoramic(
         pipe = get_pipeline(use_004=use_004)
         raw_results = pipe.run(img_np)
 
-        final_report = format_to_ssot_report(raw_results, img_w, img_h, file.filename or "panoramic.png")
+        final_report = format_to_ssot_report(
+            raw_results, 
+            img_w, 
+            img_h, 
+            file.filename or "panoramic.png",
+            image_hash=image_hash
+        )
         return final_report
 
     except Exception as e:
