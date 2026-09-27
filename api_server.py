@@ -384,12 +384,15 @@ def infer_panoramic(
         pipe = get_pipeline(use_004=use_004)
         raw_results = pipe.run(img_np)
 
+        preprocessing_id = "PRE-VISTA-AUTO-LETTERBOX-SWINIR004-v1" if use_004 else "PRE-VISTA-AUTO-LETTERBOX-v1"
+
         final_report = format_to_ssot_report(
             raw_results, 
             img_w, 
             img_h, 
             file.filename or "panoramic.png",
-            image_hash=image_hash
+            image_hash=image_hash,
+            preprocessing_id=preprocessing_id
         )
         return final_report
 
