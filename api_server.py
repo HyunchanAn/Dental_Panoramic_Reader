@@ -89,7 +89,7 @@ def format_to_ssot_report(
         for lesion in raw_report['002_lesions']:
             box = lesion.get('box', [0, 0, 0, 0])
             norm_box = normalize_bbox(box, img_w, img_h)
-            conf = lesion.get('confidence', 0.85)
+            conf = round(float(lesion.get('confidence', 0.0)), 4)
             
             fdi = lesion.get('fdi', 'Unknown')
             uncertain = conf < 0.65 or fdi == 'Unknown' or fdi is None
@@ -401,9 +401,9 @@ def health_check():
             "id": "Dental_003",
             "name": "치조골 소실 계측",
             "type": "Bone Loss Masking",
-            "status": "ONLINE",
-            "weights": "Core Interface",
-            "version": "v1.0",
+            "status": "STANDBY (Unimplemented Model)",
+            "weights": "None",
+            "version": "v1.0 (Standby)",
         },
         {
             "id": "Dental_009",

@@ -119,6 +119,19 @@ def run_tooth_segmentation(image: np.ndarray, model, device, conf_threshold=0.20
 
 from huggingface_hub import hf_hub_download
 
+def is_lfs_pointer(path: str) -> bool:
+    """Check if file is a Git LFS pointer instead of a real binary checkpoint"""
+    if not os.path.exists(path):
+        return False
+    try:
+        if os.path.getsize(path) < 1024:
+            with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+                first_line = f.readline()
+                return 'git-lfs' in first_line or first_line.startswith('version https://git-lfs')
+    except Exception:
+        pass
+    return False
+
 def init_008_classifier():
     """Dental_008 유치 이진 분류기를 안전하게 초기화하여 반환합니다."""
     model = models.resnet18(weights=None)
@@ -126,15 +139,15 @@ def init_008_classifier():
     model.fc = nn.Linear(num_ftrs, 1)
     
     ckpt_path = os.path.abspath(os.path.join(current_dir, "../../../Dental_008/weights/pretrained/classifier_best.pth"))
-    if not os.path.exists(ckpt_path):
+    if not os.path.exists(ckpt_path) or is_lfs_pointer(ckpt_path):
         try:
-            print("Downloading deciduous classifier from Hugging Face...")
+            print("Local file is absent or Git LFS pointer. Downloading deciduous classifier from Hugging Face...")
             ckpt_path = hf_hub_download(repo_id="chemahc94/dentex-tooth-segmentation", filename="classifier_best.pth")
         except Exception as e:
             print(f"Failed to download classifier from Hugging Face: {e}")
             return None
             
-    if os.path.exists(ckpt_path):
+    if os.path.exists(ckpt_path) and not is_lfs_pointer(ckpt_path):
         try:
             checkpoint = torch.load(ckpt_path, map_location='cpu')
             model.load_state_dict(checkpoint)

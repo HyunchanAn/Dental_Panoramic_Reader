@@ -31,15 +31,28 @@ def init_004_model():
     )
     
     ckpt_path = os.path.abspath(os.path.join(current_dir, "../../../Dental_004/checkpoints/pano_swinir_epoch_100.pth"))
-    if os.path.exists(ckpt_path):
+    if not os.path.exists(ckpt_path):
+        alt_path = os.path.abspath(os.path.join(current_dir, "../../modules/Dental_004/models/best_swinir.pth"))
+        if os.path.exists(alt_path):
+            ckpt_path = alt_path
+        else:
+            print("Warning: Dental_004 checkpoint not found. Refusing to return uninitialized random-weight model.")
+            return None, None
+
+    try:
         checkpoint = torch.load(ckpt_path, map_location='cpu')
-        model.load_state_dict(checkpoint['model_state_dict'])
-    
-    model.eval()
-    return model, config
+        state_dict = checkpoint.get('model_state_dict', checkpoint)
+        model.load_state_dict(state_dict)
+        model.eval()
+        return model, config
+    except Exception as e:
+        print(f"Failed to load Dental_004 checkpoint ({e}). Returning None.")
+        return None, None
 
 def run_super_resolution(image: np.ndarray, model, config, device) -> np.ndarray:
-    """초해상화 파이프라인 수행"""
+    """초해상화 파이프라인 수행 (모델 부재 시 원본 보존)"""
+    if model is None or config is None:
+        return image
     preprocessor = PanoPreprocessor()
     tiler = PanoTiler(tile_size=config['dataset']['patch_size'], overlap=32, upscale=config['model']['upscale'])
     

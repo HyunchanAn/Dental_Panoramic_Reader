@@ -164,8 +164,15 @@ class PanoramicPipeline:
                             "winters_class": "Isolated / Impacted",
                             "eruption_status": "Fully Impacted"
                         }
-                    res['box'] = m3_box.tolist() if hasattr(m3_box, 'tolist') else list(m3_box)
-                    impacted_results.append(res)
+                    
+                    # Clinical Guard: Only classify as impacted if NOT normally erupted vertical tooth
+                    is_normally_erupted = (
+                        res.get("eruption_status") == "Fully Erupted" and 
+                        res.get("winters_class") == "Vertical"
+                    )
+                    if not is_normally_erupted:
+                        res['box'] = m3_box.tolist() if hasattr(m3_box, 'tolist') else list(m3_box)
+                        impacted_results.append(res)
                     
             result_report['009_impacted'] = impacted_results
         except Exception as e:
@@ -178,13 +185,14 @@ class PanoramicPipeline:
         return result_report
 
     def _map_lesions_to_fdi(self, caries_data, tooth_roi_data):
-        # A simple implementation of map_lesions_to_fdi calculating intersection area
+        # Maps caries bounding boxes to tooth FDI labels preserving raw model confidence scores
         mapped = []
         if not caries_data or 'boxes' not in caries_data or not caries_data['boxes']:
             return mapped
             
         c_boxes = caries_data['boxes']
         c_labels = caries_data['labels']
+        c_scores = caries_data.get('scores', [])
         
         t_boxes = tooth_roi_data.get('boxes', [])
         t_fdi = tooth_roi_data.get('fdi_labels', [])
@@ -194,6 +202,7 @@ class PanoramicPipeline:
             max_inter = 0
             cx1, cy1, cx2, cy2 = c_box
             c_area = (cx2 - cx1) * (cy2 - cy1)
+            raw_conf = float(c_scores[i]) if i < len(c_scores) else 0.5
             
             for j, t_box in enumerate(t_boxes):
                 tx1, ty1, tx2, ty2 = t_box
@@ -211,6 +220,7 @@ class PanoramicPipeline:
             
             mapped.append({
                 'lesion_type': c_labels[i],
+                'confidence': raw_conf,
                 'fdi': best_fdi,
                 'box': c_box
             })
