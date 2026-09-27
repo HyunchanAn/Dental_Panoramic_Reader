@@ -73,10 +73,15 @@ def run_tooth_segmentation(image: np.ndarray, model, device, conf_threshold=0.20
     else:
         pred_masks_resized = torch.zeros((0, h, w)).to(device)
         
-    # FDI Numbering (2-Stage)
+    # FDI Numbering (2-Stage) with Clinical Uncertainty Flagging
+    uncertain_mask = torch.zeros(len(pred_boxes), dtype=torch.bool, device=device)
     try:
         pred_labels_fdi = assign_fdi_labels(pred_boxes, pred_scores, w, h)
-        pred_labels_fdi = correct_fdi_numbers(pred_boxes, pred_labels_fdi)
+        pred_labels_fdi, unc_flags = correct_fdi_numbers(pred_boxes, pred_labels_fdi, return_uncertainty=True)
+        if hasattr(unc_flags, 'to'):
+            uncertain_mask = unc_flags.to(device)
+        else:
+            uncertain_mask = torch.tensor(unc_flags, dtype=torch.bool, device=device)
     except Exception as e:
         print(f"Sequence Matcher fallback: {e}")
         pred_labels_fdi = torch.zeros(len(pred_boxes), dtype=torch.int64).to(device)
@@ -87,17 +92,20 @@ def run_tooth_segmentation(image: np.ndarray, model, device, conf_threshold=0.20
     pred_masks_resized = pred_masks_resized[valid_mask]
     pred_labels_fdi = pred_labels_fdi[valid_mask]
     pred_scores = pred_scores[valid_mask]
+    uncertain_mask = uncertain_mask[valid_mask]
     
     boxes_np = pred_boxes.cpu().numpy()
     masks_np = (pred_masks_resized.cpu().numpy() > 0.5)
     fdi_np = pred_labels_fdi.cpu().numpy()
     scores_np = pred_scores.cpu().numpy()
+    unc_np = uncertain_mask.cpu().numpy()
     
     result = {
         'boxes': [],
         'masks': [],
         'fdi_labels': [],
-        'scores': []
+        'scores': [],
+        'uncertain': []
     }
     
     for i in range(len(boxes_np)):
@@ -105,6 +113,7 @@ def run_tooth_segmentation(image: np.ndarray, model, device, conf_threshold=0.20
         result['masks'].append(masks_np[i])
         result['fdi_labels'].append(int(fdi_np[i]))
         result['scores'].append(scores_np[i])
+        result['uncertain'].append(bool(unc_np[i]))
         
     return result
 
