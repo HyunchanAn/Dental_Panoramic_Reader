@@ -7,14 +7,53 @@ from modules.periapical_predictor import PeriapicalPredictorWrapper
 from modules.restoration_predictor import RestorationPredictorWrapper
 import numpy as np
 import os
+import json
+
+def load_clinical_criteria(criteria_path=None):
+    """임상 기준표 SSOT(clinical_criteria_v1.json)를 로드하거나 기본값을 제공합니다."""
+    if criteria_path and os.path.exists(criteria_path):
+        try:
+            with open(criteria_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Error loading criteria from {criteria_path}: {e}")
+
+    possible_paths = [
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../Dental_000/plans_replies_walkthrough/clinical_criteria_v1.json")),
+        os.path.abspath("Y:/Dental_000/plans_replies_walkthrough/clinical_criteria_v1.json"),
+        os.path.abspath("plans_replies_walkthrough/clinical_criteria_v1.json"),
+    ]
+    for p in possible_paths:
+        if os.path.exists(p):
+            try:
+                with open(p, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception:
+                pass
+
+    return {
+        "supernumerary_policy": "SEPARATE_ENTITY",
+        "supernumerary_naming": "FDI Quadrant Code + 9 (예: #19, #29) 또는 SN-1",
+        "periapical_threshold_definite": 0.50,
+        "periapical_threshold_review": 0.25,
+        "periapical_anatomical_guard": True,
+        "restoration_classes": ["Inlay/Onlay", "Crown/Bridge", "Implant", "Endodontic (RCT)"],
+        "restoration_mapping": {
+            "Amalgam / Resin / Inlay": "Inlay/Onlay",
+            "Gold / PFM / Zirconia Crown": "Crown/Bridge",
+            "Implant Fixture / Abutment": "Implant",
+            "Root Canal Filling / Post": "Endodontic (RCT)"
+        }
+    }
 
 class PanoramicPipeline:
     """Dental Panoramic Reader 통합 파이프라인 오케스트레이터"""
     
-    def __init__(self, use_004=False):
+    def __init__(self, use_004=False, criteria_path=None):
         self.manager = ModelManager()
         self.use_004 = use_004
         self.device = self.manager.device
+        self.clinical_criteria = load_clinical_criteria(criteria_path)
         
         # 모델 초기화 및 매니저 등록
         # 필요 시점에만 GPU에 올리도록 처음엔 CPU로 로드
@@ -60,7 +99,9 @@ class PanoramicPipeline:
         """
         통합 진단 파이프라인을 실행합니다.
         """
-        result_report = {}
+        result_report = {
+            'clinical_criteria_version': 'v1.0'
+        }
         current_img = image.copy()
         
         # 1. 004 화질 개선 (Optional)
@@ -74,9 +115,9 @@ class PanoramicPipeline:
         has_deciduous = run_deciduous_classification(current_img, classifier_008, self.device)
         result_report['has_deciduous'] = has_deciduous
             
-        # 2. 008 치아 식별 및 마스킹
+        # 2. 008 치아 식별 및 마스킹 (임상 기준 SSOT 연동)
         model_008 = self.manager.load_to_gpu("008")
-        tooth_roi_data = run_tooth_segmentation(current_img, model_008, self.device)
+        tooth_roi_data = run_tooth_segmentation(current_img, model_008, self.device, criteria=self.clinical_criteria)
         result_report['008_tooth_data'] = tooth_roi_data
         
         # 3. 002 우식 및 병소 탐지 (2-Stage 치아 패치 연계)
@@ -99,20 +140,32 @@ class PanoramicPipeline:
                 bone_loss_data = calculate_bone_loss(current_img, tooth_roi_data, model_003)
                 result_report['003_bone_loss'] = bone_loss_data
                 
-        # 5. 012 치근단 병소 탐지 및 FDI 매칭
+        # 5. 012 치근단 병소 탐지 및 FDI 매칭 (SSOT 임계치 및 Apex 앵커링 결함 해결)
         model_012 = self.manager.load_to_gpu("012")
         if model_012 is not None:
-            # 008에서 얻은 tooth_roi_data 형식을 012의 _match_fdi에 맞게 변환
-            # (periapical_predictor expects a list of dicts: {"fdi": int, "contour": np.array})
             formatted_teeth_data_012 = []
-            if tooth_roi_data and 'fdi_labels' in tooth_roi_data and 'contours' in tooth_roi_data:
-                for fdi, contour in zip(tooth_roi_data['fdi_labels'], tooth_roi_data['contours']):
-                    formatted_teeth_data_012.append({"fdi": fdi, "contour": contour})
+            if tooth_roi_data and 'fdi_labels' in tooth_roi_data:
+                fdis = tooth_roi_data['fdi_labels']
+                boxes = tooth_roi_data.get('boxes', [])
+                contours = tooth_roi_data.get('contours', [])
+                for i in range(len(fdis)):
+                    fdi = fdis[i]
+                    bbox = boxes[i] if i < len(boxes) else None
+                    contour = contours[i] if i < len(contours) else None
+                    formatted_teeth_data_012.append({
+                        "fdi": fdi,
+                        "contour": contour,
+                        "bbox": bbox
+                    })
             
-            periapical_data = model_012.predict(current_img, teeth_data=formatted_teeth_data_012)
+            periapical_data = model_012.predict(
+                current_img, 
+                teeth_data=formatted_teeth_data_012, 
+                criteria=self.clinical_criteria
+            )
             result_report['012_periapical'] = periapical_data
             
-        # 6. 013 수복물/보철물 분류
+        # 6. 013 수복물/보철물 분류 (SSOT 4대 범주 매핑 및 전체영상 검출 결함 해결)
         model_013 = self.manager.load_to_gpu("013")
         if model_013 is not None:
             formatted_teeth_data_013 = []
@@ -120,7 +173,11 @@ class PanoramicPipeline:
                 for fdi, bbox in zip(tooth_roi_data['fdi_labels'], tooth_roi_data['boxes']):
                     formatted_teeth_data_013.append({"fdi": fdi, "bbox": bbox})
                     
-            restoration_data = model_013.predict(current_img, teeth_data=formatted_teeth_data_013)
+            restoration_data = model_013.predict(
+                current_img, 
+                teeth_data=formatted_teeth_data_013, 
+                criteria=self.clinical_criteria
+            )
             result_report['013_restoration'] = restoration_data
 
         # 7. 009 매복 제3대구치 분석 (Winter's Classification & Impaction)

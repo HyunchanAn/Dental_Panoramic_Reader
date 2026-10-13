@@ -1,5 +1,6 @@
 import os
 import sys
+import cv2
 import torch
 import numpy as np
 
@@ -50,9 +51,10 @@ def init_008_model():
     
     return model
 
-def run_tooth_segmentation(image: np.ndarray, model, device, conf_threshold=0.20, iou_threshold=0.50) -> dict:
+def run_tooth_segmentation(image: np.ndarray, model, device, conf_threshold=0.20, iou_threshold=0.50, criteria=None) -> dict:
     """
     YOLOv8 및 2-Stage Sequence Matcher를 사용하여 치아 식별 및 영역 분할을 수행합니다.
+    임상 기준 SSOT(과잉치 SEPARATE_ENTITY 정책) 및 하류 호환성(contours 추출)을 지원합니다.
     """
     h, w, _ = image.shape
     
@@ -86,34 +88,86 @@ def run_tooth_segmentation(image: np.ndarray, model, device, conf_threshold=0.20
         print(f"Sequence Matcher fallback: {e}")
         pred_labels_fdi = torch.zeros(len(pred_boxes), dtype=torch.int64).to(device)
     
+    # Supernumerary policy handling (SEPARATE_ENTITY)
+    super_policy = "SEPARATE_ENTITY"
+    if criteria and "supernumerary_policy" in criteria:
+        super_policy = criteria["supernumerary_policy"]
+
+    boxes_all = pred_boxes.cpu().numpy()
+    labels_all = pred_labels_fdi.cpu().numpy()
+    scores_all = pred_scores.cpu().numpy()
+    masks_all = (pred_masks_resized.cpu().numpy() > 0.5)
+    unc_all = uncertain_mask.cpu().numpy()
+
+    # Identify unassigned but high-confidence teeth as potential supernumerary
+    is_supernumerary = np.zeros(len(boxes_all), dtype=bool)
+    if super_policy == "SEPARATE_ENTITY" and len(boxes_all) > 0:
+        center_x = w / 2.0
+        centers_y = (boxes_all[:, 1] + boxes_all[:, 3]) / 2.0
+        sorted_y = np.sort(centers_y)
+        if len(sorted_y) > 1:
+            gaps = np.diff(sorted_y)
+            max_gap_idx = np.argmax(gaps)
+            split_y = (sorted_y[max_gap_idx] + sorted_y[max_gap_idx + 1]) / 2.0
+        else:
+            split_y = np.median(centers_y)
+        
+        for i in range(len(boxes_all)):
+            if labels_all[i] == 0 and scores_all[i] >= conf_threshold:
+                bx1, by1, bx2, by2 = boxes_all[i]
+                bcx = (bx1 + bx2) / 2.0
+                bcy = (by1 + by2) / 2.0
+                is_upper = (bcy < split_y)
+                is_left_img = (bcx <= center_x) # patient right (Q1/Q4)
+                
+                # Assign Quadrant + 9 (e.g. 19, 29, 39, 49)
+                if is_upper:
+                    quad_sn = 19 if is_left_img else 29
+                else:
+                    quad_sn = 49 if is_left_img else 39
+                    
+                labels_all[i] = quad_sn
+                is_supernumerary[i] = True
+
     # Filter valid labels (> 0)
-    valid_mask = pred_labels_fdi > 0
-    pred_boxes = pred_boxes[valid_mask]
-    pred_masks_resized = pred_masks_resized[valid_mask]
-    pred_labels_fdi = pred_labels_fdi[valid_mask]
-    pred_scores = pred_scores[valid_mask]
-    uncertain_mask = uncertain_mask[valid_mask]
-    
-    boxes_np = pred_boxes.cpu().numpy()
-    masks_np = (pred_masks_resized.cpu().numpy() > 0.5)
-    fdi_np = pred_labels_fdi.cpu().numpy()
-    scores_np = pred_scores.cpu().numpy()
-    unc_np = uncertain_mask.cpu().numpy()
-    
+    valid_mask = labels_all > 0
+    boxes_valid = boxes_all[valid_mask]
+    masks_valid = masks_all[valid_mask]
+    labels_valid = labels_all[valid_mask]
+    scores_valid = scores_all[valid_mask]
+    unc_valid = unc_all[valid_mask]
+    super_valid = is_supernumerary[valid_mask]
+
     result = {
         'boxes': [],
         'masks': [],
+        'contours': [],
         'fdi_labels': [],
         'scores': [],
-        'uncertain': []
+        'uncertain': [],
+        'is_supernumerary': []
     }
-    
-    for i in range(len(boxes_np)):
-        result['boxes'].append(boxes_np[i])
-        result['masks'].append(masks_np[i])
-        result['fdi_labels'].append(int(fdi_np[i]))
-        result['scores'].append(scores_np[i])
-        result['uncertain'].append(bool(unc_np[i]))
+
+    for i in range(len(boxes_valid)):
+        box = boxes_valid[i]
+        mask = masks_valid[i]
+        result['boxes'].append(box)
+        result['masks'].append(mask)
+        result['fdi_labels'].append(int(labels_valid[i]))
+        result['scores'].append(scores_valid[i])
+        result['uncertain'].append(bool(unc_valid[i]))
+        result['is_supernumerary'].append(bool(super_valid[i]))
+        
+        # Extract contour from mask for downstream modules
+        mask_uint8 = (mask.astype(np.uint8)) * 255
+        cnts, _ = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if cnts and len(cnts) > 0:
+            largest_cnt = max(cnts, key=cv2.contourArea)
+            result['contours'].append(largest_cnt)
+        else:
+            x1, y1, x2, y2 = box
+            bbox_cnt = np.array([[[int(x1), int(y1)]], [[int(x2), int(y1)]], [[int(x2), int(y2)]], [[int(x1), int(y2)]]], dtype=np.int32)
+            result['contours'].append(bbox_cnt)
         
     return result
 
