@@ -4,9 +4,11 @@ import cv2
 import torch
 import numpy as np
 
-# 파이썬 경로에 서브모듈 추가
+# 파이썬 경로에 내부 서브모듈 추가
 current_dir = os.path.dirname(os.path.abspath(__file__))
-module_path = os.path.abspath(os.path.join(current_dir, "../../../Dental_008/src"))
+repo_root = os.path.abspath(os.path.join(current_dir, "../.."))
+module_root = os.path.join(repo_root, "modules", "Dental_008")
+module_path = os.path.join(module_root, "src")
 if module_path not in sys.path:
     sys.path.append(module_path)
 
@@ -16,20 +18,17 @@ import torchvision.models as models
 import torchvision.transforms as transforms
 from PIL import Image
 
-try:
-    from numbering.arch_sequence_matcher import assign_fdi_labels
-    from numbering.fdi_corrector import correct_fdi_numbers
-except ImportError:
-    pass # Will handle gracefully if path issues exist
+from numbering.arch_sequence_matcher import assign_fdi_labels
+from numbering.fdi_corrector import correct_fdi_numbers
 
 def init_008_model():
     """Dental_008 YOLOv8 치아 식별 모델을 초기화하여 반환합니다."""
     possible_paths = [
-        os.path.abspath(os.path.join(current_dir, "../../modules/Dental_008/models/yolov8m_best.pt")),
-        os.path.abspath(os.path.join(current_dir, "../../../Dental_008/weights/yolov8m_best.pt")),
-        os.path.abspath(os.path.join(current_dir, "../../modules/Dental_008/models/yolov8m_best.onnx")),
-        os.path.abspath(os.path.join(current_dir, "../../../Dental_008/weights/yolov8m_best.onnx")),
-        os.path.abspath(os.path.join(current_dir, "../../../Dental_008/weights/yolov8m-seg.pt")),
+        os.path.join(module_root, "models", "yolov8m_best.pt"),
+        os.path.join(module_root, "weights", "yolov8m_best.pt"),
+        os.path.join(module_root, "models", "yolov8m_best.onnx"),
+        os.path.join(module_root, "weights", "yolov8m_best.onnx"),
+        os.path.join(module_root, "models", "best.onnx"),
     ]
     
     ckpt_path = None
@@ -37,6 +36,13 @@ def init_008_model():
         if os.path.exists(p):
             ckpt_path = p
             break
+
+    if ckpt_path is None:
+        try:
+            from setup_env import ensure_weight_file
+            ckpt_path = ensure_weight_file("Dental_008_segmentation", download_if_missing=False)
+        except Exception:
+            ckpt_path = None
             
     if ckpt_path is None:
         print("Warning: Dental_008 model weights not found.")
@@ -77,6 +83,7 @@ def run_tooth_segmentation(image: np.ndarray, model, device, conf_threshold=0.20
         
     # FDI Numbering (2-Stage) with Clinical Uncertainty Flagging
     uncertain_mask = torch.zeros(len(pred_boxes), dtype=torch.bool, device=device)
+    fdi_status = "FDI_ACTIVE"
     try:
         pred_labels_fdi = assign_fdi_labels(pred_boxes, pred_scores, w, h)
         pred_labels_fdi, unc_flags = correct_fdi_numbers(pred_boxes, pred_labels_fdi, return_uncertainty=True)
@@ -85,8 +92,10 @@ def run_tooth_segmentation(image: np.ndarray, model, device, conf_threshold=0.20
         else:
             uncertain_mask = torch.tensor(unc_flags, dtype=torch.bool, device=device)
     except Exception as e:
-        print(f"Sequence Matcher fallback: {e}")
+        print(f"[Dental_008 ERROR] Sequence Matcher runtime failure (FDI_UNAVAILABLE): {e}")
+        fdi_status = "FDI_UNAVAILABLE"
         pred_labels_fdi = torch.zeros(len(pred_boxes), dtype=torch.int64).to(device)
+        uncertain_mask = torch.ones(len(pred_boxes), dtype=torch.bool, device=device)
     
     # Supernumerary policy handling (SEPARATE_ENTITY)
     super_policy = "SEPARATE_ENTITY"
@@ -99,9 +108,9 @@ def run_tooth_segmentation(image: np.ndarray, model, device, conf_threshold=0.20
     masks_all = (pred_masks_resized.cpu().numpy() > 0.5)
     unc_all = uncertain_mask.cpu().numpy()
 
-    # Identify unassigned but high-confidence teeth as potential supernumerary
+    # Identify unassigned but high-confidence teeth as potential supernumerary (only when FDI matcher succeeded)
     is_supernumerary = np.zeros(len(boxes_all), dtype=bool)
-    if super_policy == "SEPARATE_ENTITY" and len(boxes_all) > 0:
+    if fdi_status == "FDI_ACTIVE" and super_policy == "SEPARATE_ENTITY" and len(boxes_all) > 0:
         center_x = w / 2.0
         centers_y = (boxes_all[:, 1] + boxes_all[:, 3]) / 2.0
         sorted_y = np.sort(centers_y)
@@ -129,8 +138,12 @@ def run_tooth_segmentation(image: np.ndarray, model, device, conf_threshold=0.20
                 labels_all[i] = quad_sn
                 is_supernumerary[i] = True
 
-    # Filter valid labels (> 0)
-    valid_mask = labels_all > 0
+    # Filter valid labels (> 0) when FDI_ACTIVE; retain raw detections with fdi=0 when FDI_UNAVAILABLE
+    if fdi_status == "FDI_ACTIVE":
+        valid_mask = labels_all > 0
+    else:
+        valid_mask = np.ones(len(labels_all), dtype=bool)
+
     boxes_valid = boxes_all[valid_mask]
     masks_valid = masks_all[valid_mask]
     labels_valid = labels_all[valid_mask]
@@ -145,7 +158,8 @@ def run_tooth_segmentation(image: np.ndarray, model, device, conf_threshold=0.20
         'fdi_labels': [],
         'scores': [],
         'uncertain': [],
-        'is_supernumerary': []
+        'is_supernumerary': [],
+        'fdi_status': fdi_status,
     }
 
     for i in range(len(boxes_valid)):
@@ -171,8 +185,6 @@ def run_tooth_segmentation(image: np.ndarray, model, device, conf_threshold=0.20
         
     return result
 
-from huggingface_hub import hf_hub_download
-
 def is_lfs_pointer(path: str) -> bool:
     """Check if file is a Git LFS pointer instead of a real binary checkpoint"""
     if not os.path.exists(path):
@@ -192,16 +204,21 @@ def init_008_classifier():
     num_ftrs = model.fc.in_features
     model.fc = nn.Linear(num_ftrs, 1)
     
-    ckpt_path = os.path.abspath(os.path.join(current_dir, "../../../Dental_008/weights/pretrained/classifier_best.pth"))
-    if not os.path.exists(ckpt_path) or is_lfs_pointer(ckpt_path):
+    ckpt_candidates = [
+        os.path.join(module_root, "models", "classifier_best.pth"),
+        os.path.join(module_root, "weights", "pretrained", "classifier_best.pth"),
+    ]
+    ckpt_path = next((p for p in ckpt_candidates if os.path.exists(p) and not is_lfs_pointer(p)), None)
+    if ckpt_path is None:
         try:
-            print("Local file is absent or Git LFS pointer. Downloading deciduous classifier from Hugging Face...")
-            ckpt_path = hf_hub_download(repo_id="chemahc94/dentex-tooth-segmentation", filename="classifier_best.pth")
+            from setup_env import ensure_weight_file
+            print("Local file is absent or Git LFS pointer. Resolving deciduous classifier via weights_manifest.yaml...")
+            ckpt_path = ensure_weight_file("Dental_008_classifier")
         except Exception as e:
-            print(f"Failed to download classifier from Hugging Face: {e}")
+            print(f"Failed to download classifier via setup_env: {e}")
             return None
             
-    if os.path.exists(ckpt_path) and not is_lfs_pointer(ckpt_path):
+    if ckpt_path and os.path.exists(ckpt_path) and not is_lfs_pointer(ckpt_path):
         try:
             checkpoint = torch.load(ckpt_path, map_location='cpu')
             model.load_state_dict(checkpoint)

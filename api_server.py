@@ -1,30 +1,45 @@
 import os
 import io
 import time
+import uuid
 import hashlib
 import numpy as np
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 from typing import Dict, Any, List, Optional
-from fastapi import FastAPI, File, UploadFile, HTTPException, Query
+from fastapi import FastAPI, File, UploadFile, HTTPException, Query, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from core.pipeline import PanoramicPipeline
 from modules.dental_010_heuristic import verify_missing_teeth
 
+# Decompression bomb / memory exhaustion protection
+Image.MAX_IMAGE_PIXELS = 50_000_000
+MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(30 * 1024 * 1024)))
+DEFAULT_ALLOWED_ORIGINS = (
+    "http://localhost:3000,http://127.0.0.1:3000,"
+    "http://localhost:5173,http://127.0.0.1:5173,"
+    "http://localhost:8000,http://127.0.0.1:8000"
+)
+ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get("ALLOWED_ORIGINS", DEFAULT_ALLOWED_ORIGINS).split(",")
+    if origin.strip()
+]
+
 app = FastAPI(
     title="Dental Panoramic Reader API Gateway",
     description="MSA Backend Gateway API with Dynamic Midline & Gap Distance Ratio Correction",
-    version="1.1.0",
+    version="1.2.0",
 )
 
-# Enable CORS for Dental_015 frontend and local dev environments
+# Restrict CORS to configured origins and disable credential sharing with wildcard
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-API-Token"],
 )
 
 pipeline_instance: Optional[PanoramicPipeline] = None
@@ -238,7 +253,17 @@ def format_to_ssot_report(
             })
 
     # 7. Missing Teeth Verification (Dental_010 Gap Ratio Heuristic)
-    missing_analysis = verify_missing_teeth(fdi_labels, boxes, pred_w, pred_h, midline_x_pred)
+    fdi_status = tooth_roi.get('fdi_status', 'FDI_ACTIVE') if isinstance(tooth_roi, dict) and tooth_roi else 'FDI_UNAVAILABLE'
+    if fdi_status == 'FDI_UNAVAILABLE':
+        missing_analysis = {
+            "verified_missing": [],
+            "uncertain_missing": [],
+            "gap_details": [],
+            "status": "FDI_UNAVAILABLE",
+        }
+    else:
+        missing_analysis = verify_missing_teeth(fdi_labels, boxes, pred_w, pred_h, midline_x_pred)
+        missing_analysis["status"] = "FDI_ACTIVE"
 
     # 8. Clinical Synthesis & Odontogram Status Synthesis (32 teeth)
     all_32_teeth = [
@@ -374,6 +399,8 @@ def format_to_ssot_report(
             "midline_x": round(midline_x, 1),
             "sha256_hash": image_hash,
             "preprocessing_id": preprocessing_id,
+            "fdiStatus": fdi_status,
+            "moduleVersions": raw_report.get("module_versions", {}),
         },
         "findings": {
             "teeth": teeth_list,
@@ -406,9 +433,18 @@ def health_check():
     # Check actual weights and module availability
     base_dir = os.path.dirname(os.path.abspath(__file__))
     
-    path_008 = os.path.join(base_dir, "modules", "Dental_008", "models", "yolov8m_best.pt")
+    path_008_pt = os.path.join(base_dir, "modules", "Dental_008", "models", "yolov8m_best.pt")
+    path_008_onnx = os.path.join(base_dir, "modules", "Dental_008", "models", "yolov8m_best.onnx")
+    has_008 = os.path.exists(path_008_pt) or os.path.exists(path_008_onnx)
+    weights_008 = "yolov8m_best.pt" if os.path.exists(path_008_pt) else ("yolov8m_best.onnx" if os.path.exists(path_008_onnx) else "None")
+
     path_002 = os.path.join(base_dir, "modules", "Dental_002", "models", "best_patch.onnx")
-    path_012 = os.path.join(base_dir, "modules", "Dental_012", "models", "best.onnx")
+
+    path_012_onnx = os.path.join(base_dir, "modules", "Dental_012", "models", "best.onnx")
+    path_012_pt = os.path.join(base_dir, "modules", "Dental_012", "models", "best.pt")
+    has_012 = os.path.exists(path_012_onnx) or os.path.exists(path_012_pt)
+    weights_012 = "best.pt" if os.path.exists(path_012_pt) else ("best.onnx" if os.path.exists(path_012_onnx) else "None")
+
     path_013_pth = os.path.join(base_dir, "modules", "Dental_013", "models", "best_restoration_model.pth")
     path_013_onnx = os.path.join(base_dir, "modules", "Dental_013", "models", "best_restoration_model.onnx")
     has_013 = os.path.exists(path_013_onnx) or os.path.exists(path_013_pth)
@@ -421,8 +457,8 @@ def health_check():
             "id": "Dental_008",
             "name": "치아 식별 및 FDI 분할",
             "type": "YOLOv8 Segmentation",
-            "status": "ONLINE" if os.path.exists(path_008) else "OFFLINE",
-            "weights": "yolov8m_best.pt" if os.path.exists(path_008) else "None",
+            "status": "ONLINE" if has_008 else "OFFLINE",
+            "weights": weights_008,
             "version": "v1.2 (Tooth Cls)",
         },
         {
@@ -437,8 +473,8 @@ def health_check():
             "id": "Dental_012",
             "name": "치근단 병소 (음성증강)",
             "type": "YOLO11s Detection",
-            "status": "ONLINE" if os.path.exists(path_012) else "OFFLINE",
-            "weights": "best.onnx" if os.path.exists(path_012) else "None",
+            "status": "ONLINE" if has_012 else "OFFLINE",
+            "weights": weights_012,
             "version": "v2.0 (mAP 73.7%)",
         },
         {
@@ -493,21 +529,47 @@ def health_check():
     }
 
 
+def _verify_api_token(x_api_token: Optional[str], authorization: Optional[str]) -> None:
+    expected_token = os.environ.get("DPR_API_TOKEN", "").strip()
+    if not expected_token:
+        return
+    provided = (x_api_token or "").strip()
+    if not provided and authorization and authorization.lower().startswith("bearer "):
+        provided = authorization[7:].strip()
+    if provided != expected_token:
+        raise HTTPException(status_code=401, detail="Unauthorized: valid API token required.")
+
+
 @app.post("/api/v1/infer")
 def infer_panoramic(
     file: UploadFile = File(...),
     use_004: bool = Query(False, description="Enable Dental_004 Super-Resolution preprocessing"),
+    x_api_token: Optional[str] = Header(default=None),
+    authorization: Optional[str] = Header(default=None),
 ):
+    _verify_api_token(x_api_token, authorization)
+
     if file.content_type and not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="Invalid file type. Only image files are supported.")
 
+    contents = file.file.read(MAX_UPLOAD_BYTES + 1)
+    if len(contents) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Uploaded file exceeds maximum allowed size ({MAX_UPLOAD_BYTES // (1024 * 1024)} MB).",
+        )
+    if len(contents) == 0:
+        raise HTTPException(status_code=400, detail="Uploaded image file is empty.")
+
     try:
-        contents = file.file.read()
         image_hash = hashlib.sha256(contents).hexdigest()
         image_pil = Image.open(io.BytesIO(contents)).convert("RGB")
         img_np = np.array(image_pil)
         img_h, img_w = img_np.shape[:2]
+    except (Image.DecompressionBombError, UnidentifiedImageError, OSError):
+        raise HTTPException(status_code=400, detail="Invalid or oversized image file.")
 
+    try:
         pipe = get_pipeline(use_004=use_004)
         raw_results = pipe.run(img_np)
 
@@ -523,12 +585,22 @@ def infer_panoramic(
         )
         return final_report
 
-    except Exception as e:
+    except HTTPException:
+        raise
+    except Exception:
         import traceback
+        request_id = uuid.uuid4().hex[:12]
+        print(f"[API Gateway ERROR] request_id={request_id}")
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Inference Pipeline Error: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal inference pipeline error (request_id={request_id}).",
+        )
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("api_server:app", host="0.0.0.0", port=8000, reload=False)
+    allow_external = os.environ.get("ALLOW_EXTERNAL_ACCESS", "false").lower() in ("1", "true", "yes")
+    bind_host = os.environ.get("API_HOST", "0.0.0.0" if allow_external else "127.0.0.1")
+    bind_port = int(os.environ.get("API_PORT", "8000"))
+    uvicorn.run("api_server:app", host=bind_host, port=bind_port, reload=False)

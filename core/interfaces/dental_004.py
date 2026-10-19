@@ -6,7 +6,9 @@ import numpy as np
 
 # 파이썬 경로에 서브모듈 추가
 current_dir = os.path.dirname(os.path.abspath(__file__))
-module_path = os.path.abspath(os.path.join(current_dir, "../../../Dental_004/src"))
+repo_root = os.path.abspath(os.path.join(current_dir, "../.."))
+module_root = os.path.join(repo_root, "modules", "Dental_004")
+module_path = os.path.join(module_root, "src")
 if module_path not in sys.path:
     sys.path.append(module_path)
 
@@ -17,8 +19,11 @@ import yaml
 
 def init_004_model():
     """Dental_004 SwinIR 모델을 초기화하여 반환합니다."""
-    config_path = os.path.abspath(os.path.join(current_dir, "../../../Dental_004/config/base_config.yaml"))
-    with open(config_path, 'r') as f:
+    config_path = os.path.join(module_root, "config", "base_config.yaml")
+    if not os.path.exists(config_path):
+        print(f"Warning: Dental_004 config not found at {config_path}.")
+        return None, None
+    with open(config_path, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
         
     model = SwinIRLight(
@@ -30,14 +35,14 @@ def init_004_model():
         window_size=config['model']['window_size']
     )
     
-    ckpt_path = os.path.abspath(os.path.join(current_dir, "../../../Dental_004/checkpoints/pano_swinir_epoch_100.pth"))
-    if not os.path.exists(ckpt_path):
-        alt_path = os.path.abspath(os.path.join(current_dir, "../../modules/Dental_004/models/best_swinir.pth"))
-        if os.path.exists(alt_path):
-            ckpt_path = alt_path
-        else:
-            print("Warning: Dental_004 checkpoint not found. Refusing to return uninitialized random-weight model.")
-            return None, None
+    ckpt_candidates = [
+        os.path.join(module_root, "models", "best_swinir.pth"),
+        os.path.join(module_root, "checkpoints", "pano_swinir_epoch_100.pth"),
+    ]
+    ckpt_path = next((p for p in ckpt_candidates if os.path.exists(p)), None)
+    if ckpt_path is None:
+        print("Warning: Dental_004 checkpoint not found. Refusing to return uninitialized random-weight model.")
+        return None, None
 
     try:
         checkpoint = torch.load(ckpt_path, map_location='cpu')

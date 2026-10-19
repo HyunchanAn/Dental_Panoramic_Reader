@@ -1,0 +1,71 @@
+weights:
+  Dental_001_cvm:
+    module: Dental_001
+    repo_id: chemahc94/Dental-AI-Models
+    hf_filename: Dental_001/best_cvm_v2_768px.pth
+    local_path: modules/Dental_001/models/best_cvm_v2_768px.pth
+  Dental_001_landmark:
+    module: Dental_001
+    repo_id: chemahc94/Dental-AI-Models
+    hf_filename: Dental_001/weights/best.onnx
+    local_path: modules/Dental_001/models/best.onnx
+  Dental_002_caries_detection:
+    module: Dental_002
+    repo_id: chemahc94/Dental-AI-Models
+    hf_filename: Dental_002/best_refined.onnx
+    local_path: modules/Dental_002/models/best_patch.onnx
+  Dental_002_caries_pt:
+    module: Dental_002
+    repo_id: chemahc94/Dental-AI-Models
+    hf_filename: Dental_002/best_refined.pt
+    local_path: modules/Dental_002/models/best_refined.pt
+  Dental_003_bone_loss_measurement:
+    module: Dental_003
+    repo_id: chemahc94/Dental-AI-Models
+    hf_filename: Dental_003/weights/best.onnx
+    local_path: modules/Dental_003/models/best.onnx
+  Dental_003_sam:
+    module: Dental_003
+    repo_id: chemahc94/Dental-AI-Models
+    hf_filename: Dental_003/weights/sam_vit_b_01ec64.onnx
+    local_path: modules/Dental_003/models/sam_vit_b_01ec64.onnx
+  Dental_004_swinir:
+    module: Dental_004
+    repo_id: chemahc94/Dental-AI-Models
+    hf_filename: Dental_004/pano_swinir_epoch_100.pth
+    local_path: modules/Dental_004/models/best_swinir.pth
+  Dental_008_segmentation:
+    module: Dental_008
+    repo_id: chemahc94/Dental-AI-Models
+    hf_filename: Dental_008/yolov8m_best.pt
+    local_path: modules/Dental_008/models/yolov8m_best.pt
+  Dental_008_segmentation_onnx:
+    module: Dental_008
+    repo_id: chemahc94/Dental-AI-Models
+    hf_filename: Dental_008/yolov8m_best.onnx
+    local_path: modules/Dental_008/models/yolov8m_best.onnx
+  Dental_008_classifier:
+    module: Dental_008
+    repo_id: chemahc94/dentex-tooth-segmentation
+    hf_filename: classifier_best.pth
+    local_path: modules/Dental_008/models/classifier_best.pth
+  Dental_011_age_estimation:
+    module: Dental_011
+    repo_id: chemahc94/Dental-AI-Models
+    hf_filename: Dental_011/weights/best_hybrid_age_model.onnx
+    local_path: modules/Dental_011/models/best_hybrid_age_model.onnx
+  Dental_012_periapical:
+    module: Dental_012
+    repo_id: chemahc94/Dental_012
+    hf_filename: best.onnx
+    local_path: modules/Dental_012/models/best.onnx
+  Dental_013_restoration:
+    module: Dental_013
+    repo_id: chemahc94/Dental_013
+    hf_filename: best_restoration_model.onnx
+    local_path: modules/Dental_013/models/best_restoration_model.onnx
+  Dental_014_osteoporosis:
+    module: Dental_014
+    repo_id: chemahc94/Dental_014
+    hf_filename: best.pt
+    local_path: modules/Dental_014/models/best.pt

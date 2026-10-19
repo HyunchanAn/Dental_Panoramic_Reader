@@ -4,7 +4,7 @@ import numpy as np
 import cv2
 import os
 import gc
-from huggingface_hub import hf_hub_download
+from setup_env import ensure_weight_file
 import pandas as pd
 import onnxruntime as ort
 
@@ -16,8 +16,8 @@ st.sidebar.title("⚙️ Configuration")
 
 with st.sidebar.expander("Caries Detection Settings", expanded=True):
     model_source_c = st.radio("Caries 모델", ["기본 모델", "사용자 학습 모델"])
-    custom_model_c = st.text_input("모델 경로 (.onnx)", "modules/Dental_002/models/best.onnx")
-    model_path_c = custom_model_c if model_source_c != "기본 모델" else "modules/Dental_002/models/best.onnx"
+    custom_model_c = st.text_input("모델 경로 (.onnx)", "modules/Dental_002/models/best_patch.onnx")
+    model_path_c = custom_model_c if model_source_c != "기본 모델" else "modules/Dental_002/models/best_patch.onnx"
     conf_threshold_c = st.slider("Confidence", 0.0, 1.0, 0.25)
     use_sahi_c = st.checkbox("Use SAHI", value=False)
     slice_size_c = st.select_slider("Slice Size", options=[320, 640, 800, 1024], value=640, disabled=not use_sahi_c)
@@ -49,66 +49,62 @@ except ImportError as e:
 @st.cache_resource
 def load_registry(model_path_c):
     registry = PredictorRegistry()
-    
+
+    def get_manifest_weight(weight_key: str) -> str:
+        path = ensure_weight_file(weight_key)
+        if not path:
+            st.error(f"가중치({weight_key})를 로드할 수 없습니다. weights_manifest.yaml 및 네트워크 상태를 확인하십시오.")
+            st.stop()
+        return path
+
     # Load Caries Wrapper
     c_path = model_path_c
     if not os.path.exists(c_path):
-        try: 
-            c_path = hf_hub_download(repo_id="chemahc94/Dental-AI-Models", filename="Dental_002/best_refined.onnx")
-        except Exception as e:
-            st.error(f"허깅페이스 인증 토큰 만료 또는 네트워크 장애로 가중치를 다운로드할 수 없습니다. (002): {e}")
-            st.stop()
+        c_path = get_manifest_weight("Dental_002_caries_detection")
     caries_wrapper = CariesPredictorWrapper(model_path=c_path)
     registry.register_module("Dental_002_caries_detection", caries_wrapper)
-    
-    # Load Bone Loss Wrapper
-    def get_model_path(repo_id, hf_name, local_path):
-        if os.path.exists(local_path): return local_path
-        try: return hf_hub_download(repo_id=repo_id, filename=hf_name)
-        except Exception as e:
-            st.error(f"허깅페이스 인증 토큰 만료 또는 네트워크 장애로 가중치를 다운로드할 수 없습니다. ({hf_name}): {e}")
-            st.stop()
 
-    boneloss_weight = get_model_path("chemahc94/Dental-AI-Models", "Dental_003/weights/best.onnx", "modules/Dental_003/models/best.onnx")
-    sam_weight = get_model_path("chemahc94/Dental-AI-Models", "Dental_003/weights/sam_vit_b_01ec64.onnx", "modules/Dental_003/models/sam_vit_b_01ec64.onnx")
+    # Load Bone Loss Wrapper
+    boneloss_weight = get_manifest_weight("Dental_003_bone_loss_measurement")
+    sam_weight = get_manifest_weight("Dental_003_sam")
     boneloss_wrapper = BoneLossPredictorWrapper(boneloss_weight, sam_weight, "cuda")
     registry.register_module("Dental_003_bone_loss_measurement", boneloss_wrapper)
-    
+
     # Load Segmentation Wrapper (008)
-    seg_path = get_model_path("chemahc94/Dental-AI-Models", "Dental_008/yolov8m_best.onnx", "modules/Dental_008/models/best.onnx")
+    seg_path = get_manifest_weight("Dental_008_segmentation_onnx")
     seg_wrapper = SegmentationPredictorWrapper(model_path=seg_path)
     registry.register_module("Dental_008_segmentation", seg_wrapper)
-    
+
     # Load Impacted Tooth Wrapper (009)
     impacted_wrapper = ImpactedToothPredictorWrapper()
     registry.register_module("Dental_009_impacted_tooth", impacted_wrapper)
-    
+
     # Load Missing Tooth Wrapper (010)
     missing_wrapper = MissingToothPredictorWrapper()
     registry.register_module("Dental_010_missing_tooth", missing_wrapper)
-    
+
     # Load Age Predictor Wrapper (011)
-    age_path = get_model_path("chemahc94/Dental-AI-Models", "Dental_011/weights/best_hybrid_age_model.onnx", "modules/Dental_011/models/best_hybrid_age_model.onnx")
+    age_path = get_manifest_weight("Dental_011_age_estimation")
     age_wrapper = AgePredictorWrapper(model_path=age_path)
     registry.register_module("Dental_011_age_estimation", age_wrapper)
-    
+
     # Load Periapical Predictor Wrapper (012)
     from modules.periapical_predictor import PeriapicalPredictorWrapper
-    periapical_path = get_model_path("chemahc94/Dental_012", "best.onnx", "modules/Dental_012/models/best.onnx")
+    periapical_path = get_manifest_weight("Dental_012_periapical")
     periapical_wrapper = PeriapicalPredictorWrapper(model_path=periapical_path)
     registry.register_module("Dental_012_periapical", periapical_wrapper)
-    
+
     # Load Restoration Predictor Wrapper (013)
     from modules.restoration_predictor import RestorationPredictorWrapper
-    restoration_path = get_model_path("chemahc94/Dental_013", "best_restoration_model.onnx", "modules/Dental_013/models/best.onnx")
+    restoration_path = get_manifest_weight("Dental_013_restoration")
     restoration_wrapper = RestorationPredictorWrapper(model_path=restoration_path)
     registry.register_module("Dental_013_restoration", restoration_wrapper)
-    
+
     # Load Osteoporosis Predictor Wrapper (014)
-    osteo_weight_path = get_model_path("chemahc94/Dental_014", "best.pt", "modules/Dental_014/models/best.pt")
+    osteo_weight_path = get_manifest_weight("Dental_014_osteoporosis")
     osteo_wrapper = OsteoporosisPredictorWrapper(weight_path=osteo_weight_path)
     registry.register_module("Dental_014_osteoporosis", osteo_wrapper)
-    
+
     return registry
 
 registry = load_registry(model_path_c)

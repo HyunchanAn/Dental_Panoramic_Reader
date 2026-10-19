@@ -6,7 +6,8 @@ import numpy as np
 from ultralytics import YOLO
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
-module_path = os.path.abspath(os.path.join(current_dir, "../../../Dental_002"))
+repo_root = os.path.abspath(os.path.join(current_dir, "../.."))
+module_path = os.path.join(repo_root, "modules", "Dental_002")
 if module_path not in sys.path:
     sys.path.append(module_path)
 
@@ -22,7 +23,6 @@ def apply_clahe(img_bgr: np.ndarray) -> np.ndarray:
 def init_002_model():
     """Dental_002 (Caries) YOLO 모델 초기화. 2-Stage 패치 모델 우선 탐색."""
     possible_paths = [
-        os.path.join(current_dir, "../../modules/Dental_002/models/best_patch.onnx"),
         os.path.join(module_path, "models", "best_patch.onnx"),
         os.path.join(module_path, "models", "best_patch.pt"),
         os.path.join(module_path, "models", "best_refined.onnx"),
@@ -35,6 +35,13 @@ def init_002_model():
         if os.path.exists(p):
             model_path = p
             break
+
+    if model_path is None:
+        try:
+            from setup_env import ensure_weight_file
+            model_path = ensure_weight_file("Dental_002_caries_detection", download_if_missing=False)
+        except Exception:
+            model_path = None
             
     if model_path is None:
         print("Warning: Dental_002 model weights not found. Running in fallback mode.")

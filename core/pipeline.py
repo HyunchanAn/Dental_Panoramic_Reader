@@ -9,28 +9,52 @@ from modules.osteoporosis_predictor import OsteoporosisPredictorWrapper
 import numpy as np
 import os
 import json
+import subprocess
+
+def get_submodule_shas(base_dir: str) -> dict:
+    """각 내부 서브모듈(modules/Dental_*)의 현재 Git 커밋 SHA를 수집합니다."""
+    shas = {}
+    modules_dir = os.path.join(base_dir, "modules")
+    if not os.path.isdir(modules_dir):
+        return shas
+    for name in sorted(os.listdir(modules_dir)):
+        sub_path = os.path.join(modules_dir, name)
+        if name.startswith("Dental_") and os.path.isdir(sub_path):
+            try:
+                res = subprocess.run(
+                    ["git", "rev-parse", "--short", "HEAD"],
+                    cwd=sub_path,
+                    capture_output=True,
+                    text=True,
+                    timeout=2,
+                    check=False,
+                )
+                if res.returncode == 0 and res.stdout.strip():
+                    shas[name] = res.stdout.strip()
+            except Exception:
+                pass
+    return shas
 
 def load_clinical_criteria(criteria_path=None):
     """임상 기준표 SSOT(clinical_criteria_v1.json)를 로드하거나 기본값을 제공합니다."""
-    if criteria_path and os.path.exists(criteria_path):
-        try:
-            with open(criteria_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception as e:
-            print(f"Error loading criteria from {criteria_path}: {e}")
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env_path = os.environ.get("CLINICAL_CRITERIA_PATH")
 
-    possible_paths = [
-        os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../Dental_000/plans_replies_walkthrough/clinical_criteria_v1.json")),
-        os.path.abspath("Y:/Dental_000/plans_replies_walkthrough/clinical_criteria_v1.json"),
-        os.path.abspath("plans_replies_walkthrough/clinical_criteria_v1.json"),
+    candidate_paths = [
+        p for p in [
+            criteria_path,
+            env_path,
+            os.path.join(base_dir, "plans_replies_walkthrough", "clinical_criteria_v1.json"),
+        ]
+        if p
     ]
-    for p in possible_paths:
+    for p in candidate_paths:
         if os.path.exists(p):
             try:
                 with open(p, 'r', encoding='utf-8') as f:
                     return json.load(f)
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"Error loading criteria from {p}: {e}")
 
     return {
         "supernumerary_policy": "SEPARATE_ENTITY",
@@ -55,6 +79,8 @@ class PanoramicPipeline:
         self.use_004 = use_004
         self.device = self.manager.device
         self.clinical_criteria = load_clinical_criteria(criteria_path)
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.module_versions = get_submodule_shas(base_dir)
         
         # 모델 초기화 및 매니저 등록
         # 필요 시점에만 GPU에 올리도록 처음엔 CPU로 로드
@@ -82,10 +108,12 @@ class PanoramicPipeline:
         if model_003 is not None:
             self.manager.register_model("003", model_003)
             
-        # 012 모델 (필수: 치근단 병소 탐지)
-        # Using submodule path
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        model_012_path = os.path.join(base_dir, "modules", "Dental_012", "models", "best.pt")
+        # 012 모델 (필수: 치근단 병소 탐지 — best.pt 및 best.onnx 모두 지원)
+        model_012_candidates = [
+            os.path.join(base_dir, "modules", "Dental_012", "models", "best.pt"),
+            os.path.join(base_dir, "modules", "Dental_012", "models", "best.onnx"),
+        ]
+        model_012_path = next((p for p in model_012_candidates if os.path.exists(p)), model_012_candidates[1])
         model_012 = PeriapicalPredictorWrapper(model_path=model_012_path)
         self.manager.register_model("012", model_012)
         
@@ -106,7 +134,8 @@ class PanoramicPipeline:
         통합 진단 파이프라인을 실행합니다.
         """
         result_report = {
-            'clinical_criteria_version': 'v1.0'
+            'clinical_criteria_version': 'v1.0',
+            'module_versions': self.module_versions,
         }
         current_img = image.copy()
         
