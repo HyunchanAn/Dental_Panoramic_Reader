@@ -54,7 +54,7 @@ def load_registry(model_path_c):
     c_path = model_path_c
     if not os.path.exists(c_path):
         try: 
-            c_path = hf_hub_download(repo_id="chemahc94/Dental-AI-Models", filename="Dental_002/best_refined.onnx", token=True)
+            c_path = hf_hub_download(repo_id="chemahc94/Dental-AI-Models", filename="Dental_002/best_refined.onnx")
         except Exception as e:
             st.error(f"허깅페이스 인증 토큰 만료 또는 네트워크 장애로 가중치를 다운로드할 수 없습니다. (002): {e}")
             st.stop()
@@ -64,13 +64,13 @@ def load_registry(model_path_c):
     # Load Bone Loss Wrapper
     def get_model_path(repo_id, hf_name, local_path):
         if os.path.exists(local_path): return local_path
-        try: return hf_hub_download(repo_id=repo_id, filename=hf_name, token=True)
+        try: return hf_hub_download(repo_id=repo_id, filename=hf_name)
         except Exception as e:
             st.error(f"허깅페이스 인증 토큰 만료 또는 네트워크 장애로 가중치를 다운로드할 수 없습니다. ({hf_name}): {e}")
             st.stop()
 
-    boneloss_weight = get_model_path("chemahc94/Dental-AI-Models", "Dental_003/best.onnx", "modules/Dental_003/models/best.onnx")
-    sam_weight = get_model_path("chemahc94/Dental-AI-Models", "Dental_003/sam_vit_b_01ec64.onnx", "modules/Dental_003/models/sam_vit_b_01ec64.onnx")
+    boneloss_weight = get_model_path("chemahc94/Dental-AI-Models", "Dental_003/weights/best.onnx", "modules/Dental_003/models/best.onnx")
+    sam_weight = get_model_path("chemahc94/Dental-AI-Models", "Dental_003/weights/sam_vit_b_01ec64.onnx", "modules/Dental_003/models/sam_vit_b_01ec64.onnx")
     boneloss_wrapper = BoneLossPredictorWrapper(boneloss_weight, sam_weight, "cuda")
     registry.register_module("Dental_003_bone_loss_measurement", boneloss_wrapper)
     
@@ -88,7 +88,7 @@ def load_registry(model_path_c):
     registry.register_module("Dental_010_missing_tooth", missing_wrapper)
     
     # Load Age Predictor Wrapper (011)
-    age_path = get_model_path("chemahc94/Dental-AI-Models", "Dental_011/best_hybrid_age_model.onnx", "modules/Dental_011/models/best_hybrid_age_model.onnx")
+    age_path = get_model_path("chemahc94/Dental-AI-Models", "Dental_011/weights/best_hybrid_age_model.onnx", "modules/Dental_011/models/best_hybrid_age_model.onnx")
     age_wrapper = AgePredictorWrapper(model_path=age_path)
     registry.register_module("Dental_011_age_estimation", age_wrapper)
     
@@ -105,7 +105,7 @@ def load_registry(model_path_c):
     registry.register_module("Dental_013_restoration", restoration_wrapper)
     
     # Load Osteoporosis Predictor Wrapper (014)
-    osteo_weight_path = get_model_path("chemahc94/Dental-AI-Models", "Dental_014/weights/best.onnx", "modules/Dental_014/models/best.onnx")
+    osteo_weight_path = get_model_path("chemahc94/Dental_014", "best.pt", "modules/Dental_014/models/best.pt")
     osteo_wrapper = OsteoporosisPredictorWrapper(weight_path=osteo_weight_path)
     registry.register_module("Dental_014_osteoporosis", osteo_wrapper)
     

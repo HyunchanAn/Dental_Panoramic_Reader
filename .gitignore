@@ -8,6 +8,7 @@ __pycache__/
 data/
 *.zip
 *.rar
-*.pt
 *.pth
 .env
+*.log
+output.txt

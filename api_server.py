@@ -31,8 +31,8 @@ pipeline_instance: Optional[PanoramicPipeline] = None
 
 def get_pipeline(use_004: bool = False) -> PanoramicPipeline:
     global pipeline_instance
-    if pipeline_instance is None:
-        print("[API Gateway] Initializing PanoramicPipeline...")
+    if pipeline_instance is None or pipeline_instance.use_004 != use_004:
+        print(f"[API Gateway] Initializing PanoramicPipeline (use_004={use_004})...")
         pipeline_instance = PanoramicPipeline(use_004=use_004)
     return pipeline_instance
 
@@ -80,15 +80,23 @@ def format_to_ssot_report(
     caries_list = []
     bone_loss_list = []
     periapical_list = []
+
+    # If super-resolution (004_image) was executed, all downstream coordinates are in 004_image pixel space
+    sr_img = raw_report.get('004_image')
+    if isinstance(sr_img, np.ndarray) and sr_img.ndim >= 2:
+        pred_h, pred_w = int(sr_img.shape[0]), int(sr_img.shape[1])
+    else:
+        pred_w, pred_h = img_w, img_h
     
     tooth_roi = raw_report.get('008_tooth_data', {})
-    midline_x = calculate_dynamic_midline(tooth_roi, img_w)
+    midline_x_pred = calculate_dynamic_midline(tooth_roi, pred_w)
+    midline_x = midline_x_pred * (float(img_w) / float(pred_w)) if pred_w > 0 else float(img_w) / 2.0
 
     # 1. Caries & Lesions mapping (Dental_002) with uncertain_fdi & relative position
     if '002_lesions' in raw_report and raw_report['002_lesions']:
         for lesion in raw_report['002_lesions']:
             box = lesion.get('box', [0, 0, 0, 0])
-            norm_box = normalize_bbox(box, img_w, img_h)
+            norm_box = normalize_bbox(box, pred_w, pred_h)
             conf = round(float(lesion.get('confidence', 0.0)), 4)
             
             fdi = lesion.get('fdi', 'Unknown')
@@ -96,8 +104,8 @@ def format_to_ssot_report(
             
             cx = (box[0] + box[2]) / 2.0
             cy = (box[1] + box[3]) / 2.0
-            quadrant = "Q1/Q4 (Right)" if cx < midline_x else "Q2/Q3 (Left)"
-            relative_label = f"{quadrant} RelPos-{(abs(cx - midline_x) / (img_w / 2.0)):.2f}"
+            quadrant = "Q1/Q4 (Right)" if cx < midline_x_pred else "Q2/Q3 (Left)"
+            relative_label = f"{quadrant} RelPos-{(abs(cx - midline_x_pred) / (pred_w / 2.0)):.2f}"
 
             if uncertain:
                 fdi_label = f"Quadrant Approx ({relative_label})"
@@ -133,8 +141,8 @@ def format_to_ssot_report(
                 for pt in contour_info.get('pts', []):
                     px, py = pt[0], pt[1]
                     points.append({
-                        "x": round(max(0.0, min(1.0, px / img_w)), 4),
-                        "y": round(max(0.0, min(1.0, py / img_h)), 4),
+                        "x": round(max(0.0, min(1.0, px / pred_w)), 4),
+                        "y": round(max(0.0, min(1.0, py / pred_h)), 4),
                     })
                 
                 bone_loss_list.append({
@@ -150,27 +158,32 @@ def format_to_ssot_report(
         p_items = p_raw.get('lesions', []) if isinstance(p_raw, dict) else (p_raw if isinstance(p_raw, list) else [])
         for item in p_items:
             box = item.get('bbox', [0, 0, 0, 0])
-            norm_box = normalize_bbox(box, img_w, img_h)
+            norm_box = normalize_bbox(box, pred_w, pred_h)
             periapical_list.append({
                 "x": norm_box["x"],
                 "y": norm_box["y"],
                 "w": norm_box["w"],
                 "h": norm_box["h"],
-                "confidence": item.get('confidence', item.get('score', 0.80)),
+                "confidence": round(float(item.get('confidence', item.get('score', 0.80))), 4),
                 "label": "Periapical Lesion",
                 "toothNumber": item.get('fdi', None),
+                "clinicalStatus": item.get('clinical_status', 'DEFINITE'),
+                "isolatedAnatomicalSuspicion": bool(item.get('isolated_anatomical_suspicion', False)),
             })
 
-    # 4. Detected Teeth (Dental_008) - 32 Tooth BBoxes & FDI Labels
+    # 4. Detected Teeth (Dental_008) - 32 Tooth BBoxes, FDI Labels & Supernumerary Separation
     teeth_list = []
+    supernumerary_list = []
     fdi_labels = tooth_roi.get('fdi_labels', []) if tooth_roi else []
     boxes = tooth_roi.get('boxes', []) if tooth_roi else []
     uncertain_flags = tooth_roi.get('uncertain', [False] * len(boxes)) if tooth_roi else []
     scores = tooth_roi.get('scores', [0.9] * len(boxes)) if tooth_roi else []
+    super_flags = tooth_roi.get('is_supernumerary', [False] * len(boxes)) if tooth_roi else []
 
-    for fdi, box, unc, sc in zip(fdi_labels, boxes, uncertain_flags, scores):
-        norm_box = normalize_bbox(box, img_w, img_h)
-        teeth_list.append({
+    for idx, (fdi, box, unc, sc) in enumerate(zip(fdi_labels, boxes, uncertain_flags, scores)):
+        is_sup = bool(super_flags[idx]) if idx < len(super_flags) else (int(fdi) in {19, 29, 39, 49})
+        norm_box = normalize_bbox(box, pred_w, pred_h)
+        tooth_entry = {
             "toothNumber": int(fdi),
             "x": norm_box["x"],
             "y": norm_box["y"],
@@ -178,7 +191,11 @@ def format_to_ssot_report(
             "h": norm_box["h"],
             "confidence": round(float(sc), 2),
             "uncertain": bool(unc),
-        })
+            "isSupernumerary": is_sup,
+        }
+        teeth_list.append(tooth_entry)
+        if is_sup:
+            supernumerary_list.append(tooth_entry)
 
     # 5. Restorations & Prosthetics (Dental_013)
     restorations_list = []
@@ -187,10 +204,15 @@ def format_to_ssot_report(
         r_items = r_raw.get('results', []) if isinstance(r_raw, dict) else (r_raw if isinstance(r_raw, list) else [])
         for item in r_items:
             box = item.get('bbox', item.get('box', [0, 0, 0, 0]))
-            norm_box = normalize_bbox(box, img_w, img_h)
+            norm_box = normalize_bbox(box, pred_w, pred_h)
+            rest_type = item.get(
+                'clinical_category',
+                item.get('type', item.get('raw_class', item.get('class_name', 'Restoration')))
+            )
             restorations_list.append({
                 "toothNumber": item.get('fdi', None),
-                "type": item.get('type', item.get('class_name', 'Restoration')),
+                "type": rest_type,
+                "rawClass": item.get('raw_class', None),
                 "confidence": round(float(item.get('confidence', item.get('score', 0.85))), 2),
                 "x": norm_box["x"],
                 "y": norm_box["y"],
@@ -203,7 +225,7 @@ def format_to_ssot_report(
     if '009_impacted' in raw_report and raw_report['009_impacted']:
         for item in raw_report['009_impacted']:
             box = item.get('box', [0, 0, 0, 0])
-            norm_box = normalize_bbox(box, img_w, img_h)
+            norm_box = normalize_bbox(box, pred_w, pred_h)
             impacted_list.append({
                 "toothNumber": item.get('fdi'),
                 "wintersClass": item.get('winters_class', 'Impacted'),
@@ -216,7 +238,7 @@ def format_to_ssot_report(
             })
 
     # 7. Missing Teeth Verification (Dental_010 Gap Ratio Heuristic)
-    missing_analysis = verify_missing_teeth(fdi_labels, boxes, img_w, img_h, midline_x)
+    missing_analysis = verify_missing_teeth(fdi_labels, boxes, pred_w, pred_h, midline_x_pred)
 
     # 8. Clinical Synthesis & Odontogram Status Synthesis (32 teeth)
     all_32_teeth = [
@@ -293,6 +315,8 @@ def format_to_ssot_report(
     summary_parts = []
     if teeth_list:
         summary_parts.append(f"치아 {len(teeth_list)}개 식별 완료.")
+    if supernumerary_list:
+        summary_parts.append(f"과잉치 {len(supernumerary_list)}개 ({[s['toothNumber'] for s in supernumerary_list]}) 분리 식별.")
     if impacted_list:
         summary_parts.append(f"매복치 {len(impacted_list)}개 ({[i['toothNumber'] for i in impacted_list]}) 감지.")
     if restorations_list:
@@ -310,6 +334,35 @@ def format_to_ssot_report(
 
     summary_text = " ".join(summary_parts) if summary_parts else "분석 결과 특이 소견이 없습니다."
 
+    # 8.5 Osteoporosis Risk Screening (Dental_014)
+    osteo_raw = raw_report.get('014_osteoporosis')
+    if osteo_raw and isinstance(osteo_raw, dict) and 'pred_class' in osteo_raw:
+        pred_cls = str(osteo_raw.get('pred_class', 'Normal'))
+        probs = osteo_raw.get('probabilities', {}) or {}
+        if pred_cls.startswith('Osteoporosis'):
+            osteo_category = "HIGH"
+        elif pred_cls.startswith('Osteopenia'):
+            osteo_category = "MODERATE"
+        else:
+            osteo_category = "LOW"
+        normal_prob = float(probs.get('Normal', 0.85))
+        osteo_score = round(max(0.0, min(1.0, 1.0 - normal_prob)), 4)
+        osteo_risk = {
+            "score": osteo_score,
+            "category": osteo_category,
+            "status": "ACTIVE_INFERENCE",
+            "predictedClass": pred_cls,
+            "probabilities": {k: round(float(v), 4) for k, v in probs.items()},
+        }
+    else:
+        osteo_risk = {
+            "score": None,
+            "category": None,
+            "status": "NOT_AVAILABLE",
+            "predictedClass": None,
+            "probabilities": None,
+        }
+
     return {
         "reportId": f"REP-{int(time.time())}",
         "patientId": "PATIENT-DEMO",
@@ -324,17 +377,14 @@ def format_to_ssot_report(
         },
         "findings": {
             "teeth": teeth_list,
+            "supernumeraryTeeth": supernumerary_list,
             "caries": caries_list,
             "boneLoss": bone_loss_list,
             "periapicalLesions": periapical_list,
             "restorations": restorations_list,
             "impactedTeeth": impacted_list,
             "missingTeeth": missing_analysis,
-            "osteoporosisRisk": {
-                "score": 0.15,
-                "category": "LOW",
-                "status": "MOCK_SCREENING",
-            },
+            "osteoporosisRisk": osteo_risk,
             "clinicalSynthesis": clinical_synthesis,
         },
         "summary": summary_text,
@@ -363,6 +413,8 @@ def health_check():
     path_013_onnx = os.path.join(base_dir, "modules", "Dental_013", "models", "best_restoration_model.onnx")
     has_013 = os.path.exists(path_013_onnx) or os.path.exists(path_013_pth)
     weights_013 = "best_restoration_model.onnx" if os.path.exists(path_013_onnx) else ("best_restoration_model.pth" if os.path.exists(path_013_pth) else "Not Loaded")
+    path_014 = os.path.join(base_dir, "modules", "Dental_014", "models", "best.pt")
+    has_014 = os.path.exists(path_014)
     
     modules_status = [
         {
@@ -424,10 +476,10 @@ def health_check():
         {
             "id": "Dental_014",
             "name": "골다공증 위험도 스크리닝",
-            "type": "Mandibular Cortex Index (MOCK)",
-            "status": "MOCK",
-            "weights": "Mock Baseline Threshold",
-            "version": "v0.5 (MOCK)",
+            "type": "ViT/MAE Mandibular Cortex Screening" if has_014 else "Mandibular Cortex Index (MOCK)",
+            "status": "ONLINE" if has_014 else "MOCK",
+            "weights": "best.pt" if has_014 else "Mock Baseline Threshold",
+            "version": "v1.0 (OsteoMAENet)" if has_014 else "v0.5 (MOCK)",
         },
     ]
 

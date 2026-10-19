@@ -5,6 +5,7 @@ from core.interfaces.dental_002 import init_002_model, run_caries_detection
 from core.interfaces.dental_003 import init_003_model, calculate_bone_loss
 from modules.periapical_predictor import PeriapicalPredictorWrapper
 from modules.restoration_predictor import RestorationPredictorWrapper
+from modules.osteoporosis_predictor import OsteoporosisPredictorWrapper
 import numpy as np
 import os
 import json
@@ -94,6 +95,11 @@ class PanoramicPipeline:
             model_013_path = os.path.join(base_dir, "modules", "Dental_013", "models", "best_restoration_model.pth")
         model_013 = RestorationPredictorWrapper(model_path=model_013_path)
         self.manager.register_model("013", model_013)
+
+        # 014 모델 (골다공증 스크리닝)
+        model_014_path = os.path.join(base_dir, "modules", "Dental_014", "models", "best.pt")
+        model_014 = OsteoporosisPredictorWrapper(model_path=model_014_path, device=str(self.device))
+        self.manager.register_model("014", model_014)
 
     def run(self, image: np.ndarray) -> dict:
         """
@@ -235,6 +241,14 @@ class PanoramicPipeline:
         except Exception as e:
             print(f"Dental_009 impaction analysis warning: {e}")
             result_report['009_impacted'] = []
+
+        # 8. 014 골다공증 스크리닝 (ViT/MAE Mandibular Cortex Screening)
+        model_014 = self.manager.load_to_gpu("014")
+        if model_014 is not None:
+            osteo_data = model_014.predict(current_img)
+            result_report['014_osteoporosis'] = osteo_data
+        else:
+            result_report['014_osteoporosis'] = None
             
         # GPU 캐시 비우기
         self.manager.clear_cache()
