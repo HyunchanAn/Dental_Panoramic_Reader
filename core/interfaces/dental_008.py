@@ -4,10 +4,14 @@ import cv2
 import torch
 import numpy as np
 
-# 파이썬 경로에 내부 서브모듈 추가
+# 파이썬 경로에 내부 서브모듈 우선 추가
 current_dir = os.path.dirname(os.path.abspath(__file__))
 repo_root = os.path.abspath(os.path.join(current_dir, "../.."))
 module_root = os.path.join(repo_root, "modules", "Dental_008")
+if not os.path.isdir(os.path.join(module_root, "src")):
+    alt_root = os.path.join(os.path.dirname(repo_root), "Dental_008")
+    if os.path.isdir(os.path.join(alt_root, "src")):
+        module_root = alt_root
 module_path = os.path.join(module_root, "src")
 if module_path not in sys.path:
     sys.path.append(module_path)

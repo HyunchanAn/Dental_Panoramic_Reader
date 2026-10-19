@@ -5,11 +5,15 @@ import cv2
 from PIL import Image
 
 base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-d014_src = os.path.join(base_dir, "modules", "Dental_014", "src")
-if d014_src not in sys.path and os.path.exists(d014_src):
-    sys.path.insert(0, d014_src)
+for _cand in [
+    os.path.join(base_dir, "modules", "Dental_014", "src"),
+    os.path.join(os.path.dirname(base_dir), "Dental_014", "src"),
+]:
+    if os.path.isdir(_cand) and _cand not in sys.path:
+        sys.path.insert(0, _cand)
+        break
 
-from modules.Dental_014.src.dental_014.inference import OsteoporosisInferencer
+from dental_014.inference import OsteoporosisInferencer
 from .base_predictor import BasePanoramicPredictor
 
 class OsteoporosisPredictorWrapper(BasePanoramicPredictor):
