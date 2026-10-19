@@ -37,8 +37,15 @@ weights:
   Dental_008_segmentation:
     module: Dental_008
     repo_id: chemahc94/Dental-AI-Models
-    hf_filename: Dental_008/yolov8m_best.pt
+    hf_filename: Dental_008_weights_best.pt
     local_path: modules/Dental_008/models/yolov8m_best.pt
+    sha256: 88db875aa9ec209731dfce6fa630b4ee4169e3a57b084d585d5aa150263fe9b7
+  dental_008_seg:
+    module: Dental_008
+    repo_id: chemahc94/Dental-AI-Models
+    hf_filename: Dental_008_weights_best.pt
+    local_path: modules/Dental_008/weights/best.pt
+    sha256: 88db875aa9ec209731dfce6fa630b4ee4169e3a57b084d585d5aa150263fe9b7
   Dental_008_segmentation_onnx:
     module: Dental_008
     repo_id: chemahc94/Dental-AI-Models
