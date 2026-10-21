@@ -28,6 +28,7 @@ class PredictorRegistry:
                     results[name] = res
                     if hasattr(self._predictors[name], "unload_model"):
                         self._predictors[name].unload_model()
+                    if torch.cuda.is_available():
                     torch.cuda.empty_cache()
                     gc.collect()
                 except Exception as e:
@@ -60,7 +61,8 @@ class PredictorRegistry:
             for future in concurrent.futures.as_completed(future_to_name):
                 name, res = future.result()
                 results[name] = res
-                torch.cuda.empty_cache()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
                 gc.collect()
 
         return results

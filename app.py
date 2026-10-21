@@ -31,6 +31,14 @@ with st.sidebar.expander("Bone Loss Settings", expanded=True):
     pixels_per_mm = st.number_input("Pixels per mm (Calibration)", min_value=0.1, value=10.0, step=0.1)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+import sys, torch
+if os.path.join(BASE_DIR, "modules", "Dental_Core") not in sys.path:
+    sys.path.insert(0, os.path.join(BASE_DIR, "modules", "Dental_Core"))
+try:
+    from dental_core import get_device
+except ImportError:
+    def get_device(prefer_gpu: bool = True) -> str:
+        return "cuda" if (prefer_gpu and torch.cuda.is_available()) else "cpu"
 
 # Import registry and wrappers
 try:
@@ -67,7 +75,7 @@ def load_registry(model_path_c):
     # Load Bone Loss Wrapper
     boneloss_weight = get_manifest_weight("Dental_003_bone_loss_measurement")
     sam_weight = get_manifest_weight("Dental_003_sam")
-    boneloss_wrapper = BoneLossPredictorWrapper(boneloss_weight, sam_weight, "cuda")
+    boneloss_wrapper = BoneLossPredictorWrapper(boneloss_weight, sam_weight, get_device())
     registry.register_module("Dental_003_bone_loss_measurement", boneloss_wrapper)
 
     # Load Segmentation Wrapper (008)

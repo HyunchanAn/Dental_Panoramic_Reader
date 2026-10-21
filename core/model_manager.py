@@ -1,5 +1,22 @@
 import gc
+import os
+import sys
 import torch
+
+_repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+_core_path = os.path.join(_repo_root, "modules", "Dental_Core")
+if _core_path not in sys.path:
+    sys.path.insert(0, _core_path)
+
+try:
+    from dental_core import get_device, get_logger
+except ImportError:
+    import logging
+    def get_device(prefer_gpu: bool = True) -> str:
+        return "cuda" if (prefer_gpu and torch.cuda.is_available()) else "cpu"
+    def get_logger(name: str = "dental_core", level: int = logging.INFO):
+        return logging.getLogger(name)
+
 
 class ModelManager:
     """
@@ -9,7 +26,8 @@ class ModelManager:
     """
     def __init__(self):
         self.models = {}
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.device = torch.device(get_device())
+        self.logger = get_logger("ModelManager")
     
     def register_model(self, name, model):
         """모델을 등록하고 PyTorch 가중치인 경우에만 CPU에 둡니다 (ONNX 래퍼는 .to() 호출 제외)."""

@@ -123,10 +123,10 @@ cd Dental_Panoramic_Reader
 pip install -r requirements.txt
 ```
 
-### 3. 애플리케이션 실행
+### 3. 애플리케이션 실행 및 진입점 구조 (core/pipeline.py 통합 엔진 + api_server.py 게이트웨이 + app.py 워크벤치, Dental_Core 공통 유틸리티 연동)
 ```bash
 # Streamlit UI
-streamlit run app.py
+streamlit run app.py --server.port 8500
 
 # FastAPI Gateway (Dental_015 연동)
 uvicorn api_server:app --host 127.0.0.1 --port 8000

@@ -8,17 +8,22 @@ from ultralytics import YOLO
 current_dir = os.path.dirname(os.path.abspath(__file__))
 repo_root = os.path.abspath(os.path.join(current_dir, "../.."))
 module_path = os.path.join(repo_root, "modules", "Dental_002")
-if module_path not in sys.path:
-    sys.path.append(module_path)
+core_module_path = os.path.join(repo_root, "modules", "Dental_Core")
+for _p in (core_module_path, module_path):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
-def apply_clahe(img_bgr: np.ndarray) -> np.ndarray:
-    """LAB L-channel CLAHE preprocessing for tooth patch contrast"""
-    lab = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB)
-    l, a, b = cv2.split(lab)
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    cl = clahe.apply(l)
-    limg = cv2.merge((cl, a, b))
-    return cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
+try:
+    from dental_core.utils.image import apply_clahe
+except ImportError:
+    def apply_clahe(img_bgr: np.ndarray) -> np.ndarray:
+        """LAB L-channel CLAHE preprocessing for tooth patch contrast"""
+        lab = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB)
+        l, a, b = cv2.split(lab)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        cl = clahe.apply(l)
+        limg = cv2.merge((cl, a, b))
+        return cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
 
 def init_002_model():
     """Dental_002 (Caries) YOLO 모델 초기화. 2-Stage 패치 모델 우선 탐색."""
