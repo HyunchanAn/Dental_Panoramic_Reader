@@ -237,12 +237,18 @@ def init_008_classifier():
 def run_deciduous_classification(image: np.ndarray, model, device) -> bool:
     """
     유치 존재 여부를 분류합니다.
+    (학습 시 pos_weight=10.4 보정치 ln(10.4)=2.3418 역보정 및 BGR->RGB 변환 적용)
     """
     if model is None:
         return False
         
     try:
-        img = Image.fromarray(image.astype('uint8')).convert('RGB')
+        img_u8 = image.astype('uint8')
+        if img_u8.ndim == 3 and img_u8.shape[2] == 3:
+            img_rgb = cv2.cvtColor(img_u8, cv2.COLOR_BGR2RGB)
+        else:
+            img_rgb = img_u8
+        img = Image.fromarray(img_rgb).convert('RGB')
         
         val_transform = transforms.Compose([
             transforms.Resize((224, 224)),
@@ -254,8 +260,9 @@ def run_deciduous_classification(image: np.ndarray, model, device) -> bool:
         
         with torch.no_grad():
             outputs = model(img_t).squeeze(0)
-            prob = torch.sigmoid(outputs)
-            is_child = prob.item() > 0.5
+            # Calibrate logit for pos_weight=10.4 (ln(10.4) = 2.3418)
+            calibrated_prob = torch.sigmoid(outputs - 2.3418)
+            is_child = calibrated_prob.item() > 0.75
             
         return is_child
     except Exception as e:

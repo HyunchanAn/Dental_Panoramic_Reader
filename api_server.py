@@ -165,6 +165,9 @@ def format_to_ssot_report(
                     "confidence": contour_info.get('confidence', 0.88),
                     "label": "Alveolar Bone Loss",
                     "toothNumber": contour_info.get('fdi', None),
+                    "rblPercent": contour_info.get('rbl_percent', None),
+                    "lossMm": contour_info.get('loss_mm', None),
+                    "stage": contour_info.get('stage', None),
                 })
 
     # 3. Periapical Lesions (Dental_012)
@@ -440,6 +443,15 @@ def health_check():
 
     path_002 = os.path.join(base_dir, "modules", "Dental_002", "models", "best_patch.onnx")
 
+    path_003_onnx = os.path.join(base_dir, "modules", "Dental_003", "models", "best.onnx")
+    path_003_pt = os.path.join(base_dir, "modules", "Dental_003", "models", "best.pt")
+    path_003_sam = os.path.join(base_dir, "modules", "Dental_003", "models", "sam_vit_b_01ec64.pth")
+    path_003_sam_onnx = os.path.join(base_dir, "modules", "Dental_003", "models", "sam_vit_b_01ec64.onnx")
+    has_003 = (os.path.exists(path_003_onnx) or os.path.exists(path_003_pt)) and (
+        os.path.exists(path_003_sam) or os.path.exists(path_003_sam_onnx)
+    )
+    weights_003 = "best.onnx + sam_vit_b" if has_003 else "None"
+
     path_012_onnx = os.path.join(base_dir, "modules", "Dental_012", "models", "best.onnx")
     path_012_pt = os.path.join(base_dir, "modules", "Dental_012", "models", "best.pt")
     has_012 = os.path.exists(path_012_onnx) or os.path.exists(path_012_pt)
@@ -488,10 +500,10 @@ def health_check():
         {
             "id": "Dental_003",
             "name": "치조골 소실 계측",
-            "type": "Bone Loss Masking",
-            "status": "STANDBY (Unimplemented Model)",
-            "weights": "None",
-            "version": "v1.0 (Standby)",
+            "type": "SAM + Radiodensity RBL",
+            "status": "ONLINE" if has_003 else "STANDBY",
+            "weights": weights_003,
+            "version": "v2.0 (SAM + Densitometry)" if has_003 else "v1.0 (Standby)",
         },
         {
             "id": "Dental_009",

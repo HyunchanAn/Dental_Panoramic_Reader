@@ -178,7 +178,12 @@ class PanoramicPipeline:
         mapped_lesions = self._map_lesions_to_fdi(caries_data, tooth_roi_data)
         result_report["002_lesions"] = mapped_lesions
 
-        # 4. 003 치조골 소실 측정
+        # 4. 003 치조골 소실 측정 (영구치 24개 이상 또는 제3대구치 존재 시 성인 영구치열로 확정)
+        detected_fdis = {int(f) for f in (tooth_roi_data.get("fdi_labels", []) if tooth_roi_data else [])}
+        if has_deciduous and (len(detected_fdis) >= 24 or bool(detected_fdis & {18, 28, 38, 48})):
+            has_deciduous = False
+            result_report["has_deciduous"] = False
+
         if has_deciduous:
             result_report["003_bone_loss"] = None
             self.logger.info(
