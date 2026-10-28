@@ -18,7 +18,7 @@ class PredictorRegistry:
         """선택된 모듈들을 순차/병렬로 구동하고 결과를 취합"""
         results = {}
         base_modules = ["Dental_008_segmentation"]
-        
+
         # Stage 1: Run Base Modules
         for name in selected_modules:
             if name in self._predictors and name in base_modules:
@@ -29,7 +29,7 @@ class PredictorRegistry:
                     if hasattr(self._predictors[name], "unload_model"):
                         self._predictors[name].unload_model()
                     if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+                        torch.cuda.empty_cache()
                     gc.collect()
                 except Exception as e:
                     logging.error(f"Error running base module {name}: {traceback.format_exc()}")
@@ -43,7 +43,7 @@ class PredictorRegistry:
 
         # Stage 2: Run Derived Modules (Those requiring 008 outputs)
         derived_modules = [name for name in selected_modules if name in self._predictors and name not in base_modules]
-        
+
         def run_derived(name):
             try:
                 res = self._predictors[name].predict(image, **kwargs)

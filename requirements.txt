@@ -1,10 +1,15 @@
 streamlit
+fastapi
+uvicorn
+python-multipart
 opencv-python-headless
-onnxruntime-gpu==1.19.2
+onnxruntime>=1.16.0
 huggingface_hub
 torch
 torchvision
 ultralytics
-git+https://github.com/HyunchanAn/Dental_Core.git@5ff5937
+pydicom
+scikit-image
+git+https://github.com/HyunchanAn/Dental_Core.git@main
 -e ./modules/Dental_002
 -e ./modules/Dental_003

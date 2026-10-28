@@ -56,3 +56,6 @@
   - `core/interfaces/dental_003.py` 내 `BoneLossEngine`, `init_003_model()`, `calculate_bone_loss()`를 실구현하여 `Dental_008` 치아 컨투어 및 전체 치아 마스크(`all_teeth_mask`) 기반 방사선 밀도 CEJ/Crest 검출(`radiographic_densitometric_cej_crest_v2`), 파노라마 폭 비례 `mm` 환산, Stage II 이상(`RBL >= 15%`, `loss_mm >= 2.0mm`) 해부학적 골소실 폴리곤 반환 연동 완료.
   - `core/interfaces/dental_008.py` 유치 분류기의 BGR->RGB 변환 누락 및 `pos_weight=10.4` 로짓 편향(`-2.3418` 보정)과 `core/pipeline.py` 성인 영구치열(`>= 24`개 또는 사랑니 존재) 보호 가드를 추가하여 성인 파노라마에서 `003_bone_loss`가 스킵되던 결함 해결 완료.
   - `api_server.py` `/api/v1/health` 엔드포인트에서 `Dental_003` `ONLINE` (`8/8 ACTIVE`) 및 `/api/v1/infer` 골소실 폴리곤 응답 검증 완료.
+
+2026-10-28
+- 이슈 #12 해결: `modules/registry.py` 32행 `if torch.cuda.is_available():` 블록 들여쓰기 오류(`IndentationError`)를 수정하고, `requirements.txt` 내 `Dental_Core` 참조를 `@main` 최신 브랜치로 갱신하며 `onnxruntime`, `fastapi`, `uvicorn`, `pydicom`, `scikit-image` 의존성 및 CPU PyTorch 컨테이너 빌드 인덱스를 정비하여 원격 GitHub Actions CI/CD 파이프라인 복구 완료.
