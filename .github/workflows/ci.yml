@@ -32,10 +32,13 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt
+        pip install pytest httpx
 
-    - name: Verify wrapper imports
+    - name: Verify wrapper imports and run unit/API tests
       run: |
-        python -c "import sys, os; sys.path.insert(0, os.path.join(os.getcwd(), 'modules', 'Dental_002', 'src')); sys.path.insert(0, os.path.join(os.getcwd(), 'modules', 'Dental_003')); from modules.registry import PredictorRegistry; from modules.caries_predictor import CariesPredictorWrapper; from modules.boneloss_predictor import BoneLossPredictorWrapper; from modules.periapical_predictor import PeriapicalPredictorWrapper; from modules.restoration_predictor import RestorationPredictorWrapper; print('Sanity check passed!')"
+        export PYTHONPATH="${GITHUB_WORKSPACE}:${GITHUB_WORKSPACE}/modules/Dental_002/src:${GITHUB_WORKSPACE}/modules/Dental_003:${GITHUB_WORKSPACE}/modules/Dental_004/src:${GITHUB_WORKSPACE}/modules/Dental_008/src:${GITHUB_WORKSPACE}/modules/Dental_Core"
+        python -c "from modules.registry import PredictorRegistry; from modules.caries_predictor import CariesPredictorWrapper; from modules.boneloss_predictor import BoneLossPredictorWrapper; from modules.periapical_predictor import PeriapicalPredictorWrapper; from modules.restoration_predictor import RestorationPredictorWrapper; from modules.age_predictor import AgePredictorWrapper; print('Sanity check passed!')"
+        pytest tests -v
 
   docker-build:
     name: Verify Docker Build

@@ -1,8 +1,14 @@
 from core.model_manager import ModelManager, get_logger
 from core.interfaces.dental_004 import init_004_model, run_super_resolution
-from core.interfaces.dental_008 import init_008_model, run_tooth_segmentation, init_008_classifier, run_deciduous_classification
+from core.interfaces.dental_008 import (
+    init_008_model,
+    run_tooth_segmentation,
+    init_008_classifier,
+    run_deciduous_classification,
+)
 from core.interfaces.dental_002 import init_002_model, run_caries_detection
 from core.interfaces.dental_003 import init_003_model, calculate_bone_loss
+from modules.age_predictor import AgePredictorWrapper
 from modules.periapical_predictor import PeriapicalPredictorWrapper
 from modules.restoration_predictor import RestorationPredictorWrapper
 from modules.osteoporosis_predictor import OsteoporosisPredictorWrapper
@@ -49,7 +55,10 @@ def load_clinical_criteria(criteria_path=None):
         for p in [
             criteria_path,
             env_path,
+            os.path.join(base_dir, "reports", "clinical_criteria_v1.json"),
             os.path.join(base_dir, "plans_replies_walkthrough", "clinical_criteria_v1.json"),
+            os.path.join(base_dir, "reports_archive", "clinical_criteria_v1.json"),
+            os.path.join(base_dir, "plans_replies_walkthrough_archive", "clinical_criteria_v1.json"),
         ]
         if p
     ]
@@ -107,6 +116,17 @@ class PanoramicPipeline:
         if model_003 is not None:
             self.manager.register_model("003", model_003)
 
+        model_011_candidates = [
+            os.path.join(base_dir, "modules", "Dental_011", "models", "age_resnet50.onnx"),
+            os.path.join(base_dir, "modules", "Dental_011", "models", "best_model.pth"),
+        ]
+        model_011_path = next(
+            (p for p in model_011_candidates if os.path.exists(p)),
+            model_011_candidates[0],
+        )
+        model_011 = AgePredictorWrapper(model_path=model_011_path)
+        self.manager.register_model("011", model_011)
+
         model_012_candidates = [
             os.path.join(base_dir, "modules", "Dental_012", "models", "best.pt"),
             os.path.join(base_dir, "modules", "Dental_012", "models", "best.onnx"),
@@ -140,9 +160,11 @@ class PanoramicPipeline:
         """
         통합 진단 파이프라인을 실행합니다.
         """
+        module_execution = {}
         result_report = {
             "clinical_criteria_version": "v1.0",
             "module_versions": self.module_versions,
+            "module_execution": module_execution,
         }
         current_img = image.copy()
 
@@ -153,6 +175,9 @@ class PanoramicPipeline:
                 current_img, model_004, self.config_004, self.device
             )
             result_report["004_image"] = current_img
+            module_execution["Dental_004"] = {"status": "executed", "reason": None}
+        else:
+            module_execution["Dental_004"] = {"status": "skipped", "reason": "use_004=False"}
 
         # 1.5 008 이진 분류기 (유치 여부 판별)
         classifier_008 = self.manager.load_to_gpu("008_classifier")
@@ -167,6 +192,13 @@ class PanoramicPipeline:
             current_img, model_008, self.device, criteria=self.clinical_criteria
         )
         result_report["008_tooth_data"] = tooth_roi_data
+        if tooth_roi_data and tooth_roi_data.get("fdi_status") != "FDI_UNAVAILABLE":
+            module_execution["Dental_008"] = {"status": "executed", "reason": None}
+        else:
+            module_execution["Dental_008"] = {
+                "status": "unavailable" if model_008 is None else "executed",
+                "reason": "FDI segmentation model unavailable" if model_008 is None else None,
+            }
 
         # 3. 002 우식 및 병소 탐지 (2-Stage 치아 패치 연계)
         model_002 = self.manager.load_to_gpu("002")
@@ -174,9 +206,12 @@ class PanoramicPipeline:
         caries_data = run_caries_detection(
             current_img, model_002, tooth_boxes=tooth_boxes
         )
-
         mapped_lesions = self._map_lesions_to_fdi(caries_data, tooth_roi_data)
         result_report["002_lesions"] = mapped_lesions
+        module_execution["Dental_002"] = {
+            "status": "executed" if model_002 is not None else "unavailable",
+            "reason": None if model_002 is not None else "Caries model weights unavailable",
+        }
 
         # 4. 003 치조골 소실 측정 (영구치 24개 이상 또는 제3대구치 존재 시 성인 영구치열로 확정)
         detected_fdis = {int(f) for f in (tooth_roi_data.get("fdi_labels", []) if tooth_roi_data else [])}
@@ -186,6 +221,10 @@ class PanoramicPipeline:
 
         if has_deciduous:
             result_report["003_bone_loss"] = None
+            module_execution["Dental_003"] = {
+                "status": "skipped",
+                "reason": "Deciduous dentition detected",
+            }
             self.logger.info(
                 "Notice: Deciduous teeth detected. Skipping 003 Bone Loss Measurement."
             )
@@ -196,6 +235,13 @@ class PanoramicPipeline:
                     current_img, tooth_roi_data, model_003
                 )
                 result_report["003_bone_loss"] = bone_loss_data
+                module_execution["Dental_003"] = {"status": "executed", "reason": None}
+            else:
+                result_report["003_bone_loss"] = None
+                module_execution["Dental_003"] = {
+                    "status": "unavailable",
+                    "reason": "Bone loss model weights unavailable",
+                }
 
         # 5. 012 치근단 병소 탐지 및 FDI 매칭
         model_012 = self.manager.load_to_gpu("012")
@@ -219,6 +265,19 @@ class PanoramicPipeline:
                 criteria=self.clinical_criteria,
             )
             result_report["012_periapical"] = periapical_data
+            if isinstance(periapical_data, dict) and periapical_data.get("error"):
+                module_execution["Dental_012"] = {
+                    "status": "unavailable",
+                    "reason": str(periapical_data.get("error")),
+                }
+            else:
+                module_execution["Dental_012"] = {"status": "executed", "reason": None}
+        else:
+            result_report["012_periapical"] = None
+            module_execution["Dental_012"] = {
+                "status": "unavailable",
+                "reason": "Periapical model not registered",
+            }
 
         # 6. 013 수복물/보철물 분류
         model_013 = self.manager.load_to_gpu("013")
@@ -240,6 +299,19 @@ class PanoramicPipeline:
                 criteria=self.clinical_criteria,
             )
             result_report["013_restoration"] = restoration_data
+            if isinstance(restoration_data, dict) and restoration_data.get("error"):
+                module_execution["Dental_013"] = {
+                    "status": "unavailable",
+                    "reason": str(restoration_data.get("error")),
+                }
+            else:
+                module_execution["Dental_013"] = {"status": "executed", "reason": None}
+        else:
+            result_report["013_restoration"] = None
+            module_execution["Dental_013"] = {
+                "status": "unavailable",
+                "reason": "Restoration model not registered",
+            }
 
         # 7. 009 매복 제3대구치 분석
         try:
@@ -309,17 +381,62 @@ class PanoramicPipeline:
                         impacted_results.append(res)
 
             result_report["009_impacted"] = impacted_results
+            module_execution["Dental_009"] = {"status": "executed", "reason": None}
         except Exception as e:
             self.logger.warning(f"Dental_009 impaction analysis warning: {e}")
             result_report["009_impacted"] = []
+            module_execution["Dental_009"] = {
+                "status": "unavailable",
+                "reason": str(e),
+            }
 
         # 8. 014 골다공증 스크리닝
         model_014 = self.manager.load_to_gpu("014")
         if model_014 is not None:
             osteo_data = model_014.predict(current_img)
             result_report["014_osteoporosis"] = osteo_data
+            if isinstance(osteo_data, dict) and "pred_class" in osteo_data:
+                module_execution["Dental_014"] = {"status": "executed", "reason": None}
+            else:
+                module_execution["Dental_014"] = {
+                    "status": "unavailable",
+                    "reason": "Osteoporosis model weights not loaded",
+                }
         else:
             result_report["014_osteoporosis"] = None
+            module_execution["Dental_014"] = {
+                "status": "unavailable",
+                "reason": "Osteoporosis model not registered",
+            }
+
+        # 9. 011 치아 연령 추정 (Dental Age Estimation)
+        model_011 = self.manager.load_to_gpu("011")
+        if model_011 is not None:
+            formatted_teeth_data_011 = []
+            if tooth_roi_data and "contours" in tooth_roi_data:
+                for contour in tooth_roi_data.get("contours", []):
+                    if contour is not None and len(contour) > 0:
+                        formatted_teeth_data_011.append({"contour": contour})
+            age_data = model_011.predict(
+                current_img,
+                teeth_data=formatted_teeth_data_011 if formatted_teeth_data_011 else None,
+            )
+            result_report["011_age"] = age_data
+            if isinstance(age_data, dict) and "predicted_age" in age_data:
+                module_execution["Dental_011"] = {"status": "executed", "reason": None}
+            else:
+                module_execution["Dental_011"] = {
+                    "status": "unavailable",
+                    "reason": age_data.get("error", "Age model weights not loaded")
+                    if isinstance(age_data, dict)
+                    else "Age model not loaded",
+                }
+        else:
+            result_report["011_age"] = None
+            module_execution["Dental_011"] = {
+                "status": "unavailable",
+                "reason": "Age model not registered",
+            }
 
         self.manager.clear_cache()
 

@@ -36,7 +36,7 @@ graph TD
     D8_Seg --> |"Tooth ROI"| D13("Dental_013: Restoration Predictor<br/>31-Class YOLOv8-seg 수복물 분류")
     D8_Seg --> |"Tooth Contours"| D9("Dental_009: Impacted Tooth<br/>매복 제3대구치 난이도 분석")
     D8_Seg --> |"FDI & BBoxes"| D10("Dental_010: Missing/Supernumerary<br/>동적 정중선 기반 결손/과잉치 분석")
-    D8_Seg --> |"FDI Data"| D11("Dental_011: Age Prediction<br/>ResNet-18 치아 연령 추정")
+    D8_Seg --> |"FDI Data"| D11("Dental_011: Age Prediction<br/>ResNet-50 치아 연령 추정")
     D8_Seg --> |"Skip if Child"| D3("Dental_003: Bone Loss<br/>SAM + 방사선 밀도 치조골 소실 계측")
 
     D2 --> OutputReport(("Final SSOT Report<br/>JSON & UI Render"))
@@ -75,15 +75,15 @@ graph TD
 7. [`Dental_013` (Restoration & Prosthesis Classification)]: 31-Class `YOLOv8-seg` ONNX 모델(`best_restoration_model.onnx`)을 통해 수복물을 검출하고 4대 임상 범주(`Crown/Bridge`, `Implant`, `Inlay/Onlay`, `Endodontic (RCT)`) 및 FDI 치아 번호에 매핑합니다.
 8. [`Dental_009` (Impacted Third Molar Analysis)]: 제3대구치와 인접 제2대구치 컨투어 PCA 장축 각도(Winter's Classification) 및 맹출 깊이(Pell & Gregory Level A/B/C)를 분석합니다.
 9. [`Dental_010` (Missing & Supernumerary Tooth Detection)]: 최소 치아 수 가드(`< 8`), 동적 정중선 추정, 인접치 갭 비율 휴리스틱(`gap_ratio >= 1.55`)으로 결손치를 판별합니다.
-10. [`Dental_011` (Dental Age Estimation)]: `ResNet-18` 하이브리드 회귀 모델로 치아 연령을 추정합니다.
+10. [`Dental_011` (Dental Age Estimation)]: `ResNet-50` 회귀 모델(`age_resnet50.onnx`)로 치아 연령(`findings.ageEstimation`)을 추정합니다.
 11. [`Dental_014` (Osteoporosis Screening)]: `OsteoMAENet`(`best.pt`)과 하악 피질골 형태학적 특징(`morphology_features`) 융합을 통해 골다공증 위험도(`C1/C2/C3`)를 스크리닝합니다.
 
 ---
 
 ## 벤치마크 및 검증 성능
 
-- 게이트웨이 헬스체크(`GET /api/v1/health`): 8개 핵심 진단 모듈(`008, 002, 012, 010, 003, 009, 013, 014`) 전원 `ONLINE` (`8/8 ACTIVE`) 검증 완료.
-- 중앙 통합 테스트 스위트(`Dental_000/tests/tests_panoramic_reader`): 파이프라인 초기화, FDI 매핑, 유치 우회 분기, 가중치 매니페스트 및 API 보안 하드닝, 저장소 위생 테스트 전원 통과.
+- 게이트웨이 헬스체크(`GET /api/v1/health`): 9개 진단 모듈(`008, 002, 012, 010, 003, 009, 013, 014, 011`)의 `configured`, `loaded`, `ready` 상태를 분리 검증하며 동적 상태(`HEALTHY` / `DEGRADED` / `UNHEALTHY`)를 반환합니다.
+- 중앙 및 로컬 통합 테스트 스위트(`tests/test_api_and_pipeline.py`, `Dental_000/tests/tests_panoramic_reader`): Fail-Closed 토큰 인증, 인메모리 DICOM PHI 스트리핑, 헬스체크 Readiness, `ANON-` 익명 `patientId` 및 `moduleExecutionStatus`, `Dental_011` 연동, 파이프라인 초기화 및 저장소 위생 테스트 전원 통과(`10 passed`).
 
 ---
 
