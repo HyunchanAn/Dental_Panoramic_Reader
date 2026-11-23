@@ -63,15 +63,21 @@ class PeriapicalPredictorWrapper(BasePanoramicPredictor):
                 
         # Match with FDI if teeth_data is provided
         teeth_data = kwargs.get("teeth_data", None)
+        rct_fdis = kwargs.get("rct_fdis", None)
         if teeth_data is not None and len(teeth_data) > 0 and len(lesions) > 0:
-            self._match_fdi(lesions, teeth_data, anatomical_guard=anatomical_guard)
-            
+            self._match_fdi(
+                lesions,
+                teeth_data,
+                anatomical_guard=anatomical_guard,
+                rct_fdis=rct_fdis,
+            )
+
         return {
             "module_name": "Dental_012_periapical",
             "lesions": lesions
         }
 
-    def _match_fdi(self, lesions: list, teeth_data: list, anatomical_guard: bool = True):
+    def _match_fdi(self, lesions: list, teeth_data: list, anatomical_guard: bool = True, rct_fdis=None):
         """
         치근단 병소(Periapical Lesion)를 해부학적 치근단(Apex) 앵커점을 기준으로 가장 인접한 치아에 정밀 매칭합니다.
         - 상악(11~28): 뿌리가 상방(Ymin)을 향하므로 치아 상단 치근단 앵커점과 매칭 및 하방 교차 페널티 적용
@@ -79,13 +85,15 @@ class PeriapicalPredictorWrapper(BasePanoramicPredictor):
         - contour 또는 bbox 지원
         - 치아 apex와 매칭되지 않는 단독 투과상은 anatomical_guard가 켜진 경우 isolated_anatomical_suspicion 플래그 부여
         """
+        rct_set = {int(f) for f in (rct_fdis or []) if str(f).isdigit() or isinstance(f, int)}
         for lesion in lesions:
             lx1, ly1, lx2, ly2 = lesion["bbox"]
             cx = (lx1 + lx2) / 2.0
             cy = (ly1 + ly2) / 2.0
-            
+
             best_fdi = None
             min_dist = float('inf')
+            raw_geom_dist = float('inf')
             
             for tooth in teeth_data:
                 fdi = tooth.get("fdi")
@@ -159,25 +167,45 @@ class PeriapicalPredictorWrapper(BasePanoramicPredictor):
                     continue
 
                 # 치근단 해부학적 가중 유클리디안 거리 (수평 정렬도에 더 높은 가중치)
-                dist = np.sqrt((dx * 1.3) ** 2 + (dy * 0.9) ** 2)
+                geom_dist = float(np.sqrt((dx * 1.3) ** 2 + (dy * 0.9) ** 2))
+                dist = geom_dist
 
                 # 제3대구치(사랑니)는 치근단 농양/육아종의 원인치 가능성이 낮고 매복 영역이므로 페널티 부여
                 if fdi_num % 10 == 8:
                     dist += 40.0
 
                 # 임상 기준표(SSOT) 가중: 제1대구치(#36/#46/#16/#26)는 수복물 빈발 및 치근단 질환 주 원인치로서 인접 대구치 병소 공유 시 우선 앵커링
-                if (fdi_num % 10 == 6) and dist < 100.0:
+                if (fdi_num % 10 == 6) and geom_dist < 100.0:
                     dist -= 40.0
+
+                # Dental_013 Endodontic (RCT) 치아 연계 동점 우선순위 가중
+                if fdi_num in rct_set and geom_dist < 150.0:
+                    dist -= 25.0
 
                 if dist < min_dist:
                     min_dist = dist
+                    raw_geom_dist = geom_dist
                     best_fdi = fdi_num
-                        
+
             # 치아 크기 대비 허용 오차 내(치근단 부근 180px) 안착 시 FDI 할당
             if best_fdi is not None and min_dist < 180:
+                is_rct = best_fdi in rct_set
                 lesion["fdi"] = best_fdi
-                lesion["apex_distance"] = round(float(min_dist), 1)
+                lesion["apex_distance"] = round(float(max(0.0, raw_geom_dist)), 1)
+                lesion["rct_associated"] = is_rct
+                lesion["lesion_subtype"] = (
+                    "post_rct_periapical_lesion" if is_rct else "untreated_periapical_lesion"
+                )
+                if (
+                    is_rct
+                    and lesion.get("clinical_status") == "REVIEW_REQUIRED"
+                    and float(lesion.get("confidence", 0.0)) >= 0.35
+                    and raw_geom_dist <= 95.0
+                ):
+                    lesion["clinical_status"] = "DEFINITE"
             else:
+                lesion["rct_associated"] = None
+                lesion["lesion_subtype"] = "unmatched_radiolucency"
                 if anatomical_guard:
                     lesion["isolated_anatomical_suspicion"] = True
 

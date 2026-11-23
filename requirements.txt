@@ -2,6 +2,7 @@ streamlit
 fastapi
 uvicorn
 python-multipart
+pyyaml
 opencv-python-headless
 onnxruntime>=1.16.0
 huggingface_hub

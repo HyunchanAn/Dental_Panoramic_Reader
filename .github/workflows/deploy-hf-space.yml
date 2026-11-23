@@ -1,0 +1,37 @@
+name: Deploy to Private Hugging Face Space
+
+on:
+  workflow_dispatch:
+    inputs:
+      space_repo:
+        description: "Target Hugging Face Space repo (e.g. username/dental-panoramic-reader)"
+        required: false
+        default: ""
+
+jobs:
+  deploy-space:
+    name: Push Docker Context to Private HF Space
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Verify Docker image builds cleanly with CPU requirements
+        run: |
+          docker build -t panoramic-reader-space:verify .
+
+      - name: Push to Private Hugging Face Space (if HF_TOKEN configured)
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          CONFIGURED_SPACE: ${{ secrets.HF_SPACE_REPO }}
+          INPUT_SPACE: ${{ inputs.space_repo }}
+        run: |
+          TARGET_SPACE="${INPUT_SPACE:-$CONFIGURED_SPACE}"
+          if [ -z "$HF_TOKEN" ] || [ -z "$TARGET_SPACE" ]; then
+            echo "Notice: HF_TOKEN or HF_SPACE_REPO secret is not configured yet. Skipping remote Space push."
+            exit 0
+          fi
+          git push --force "https://user:${HF_TOKEN}@huggingface.co/spaces/${TARGET_SPACE}" HEAD:main

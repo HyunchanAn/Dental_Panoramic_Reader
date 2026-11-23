@@ -1,0 +1,17 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+streamlit
+fastapi
+uvicorn
+python-multipart
+pyyaml
+opencv-python-headless
+onnxruntime>=1.16.0
+huggingface_hub
+torch
+torchvision
+ultralytics
+pydicom
+scikit-image
+git+https://github.com/HyunchanAn/Dental_Core.git@main
+-e ./modules/Dental_002
+-e ./modules/Dental_003

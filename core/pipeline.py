@@ -156,7 +156,7 @@ class PanoramicPipeline:
         )
         self.manager.register_model("014", model_014)
 
-    def run(self, image: np.ndarray) -> dict:
+    def run(self, image: np.ndarray, pixel_spacing_mm=None, is_calibrated: bool = False) -> dict:
         """
         통합 진단 파이프라인을 실행합니다.
         """
@@ -165,6 +165,8 @@ class PanoramicPipeline:
             "clinical_criteria_version": "v1.0",
             "module_versions": self.module_versions,
             "module_execution": module_execution,
+            "pixel_spacing_mm": list(pixel_spacing_mm) if pixel_spacing_mm else None,
+            "is_calibrated": bool(is_calibrated and pixel_spacing_mm is not None),
         }
         current_img = image.copy()
 
@@ -232,7 +234,11 @@ class PanoramicPipeline:
             model_003 = self.manager.load_to_gpu("003")
             if model_003 is not None:
                 bone_loss_data = calculate_bone_loss(
-                    current_img, tooth_roi_data, model_003
+                    current_img,
+                    tooth_roi_data,
+                    model_003,
+                    pixel_spacing_mm=pixel_spacing_mm,
+                    is_calibrated=is_calibrated,
                 )
                 result_report["003_bone_loss"] = bone_loss_data
                 module_execution["Dental_003"] = {"status": "executed", "reason": None}
@@ -243,43 +249,8 @@ class PanoramicPipeline:
                     "reason": "Bone loss model weights unavailable",
                 }
 
-        # 5. 012 치근단 병소 탐지 및 FDI 매칭
-        model_012 = self.manager.load_to_gpu("012")
-        if model_012 is not None:
-            formatted_teeth_data_012 = []
-            if tooth_roi_data and "fdi_labels" in tooth_roi_data:
-                fdis = tooth_roi_data["fdi_labels"]
-                boxes = tooth_roi_data.get("boxes", [])
-                contours = tooth_roi_data.get("contours", [])
-                for i in range(len(fdis)):
-                    fdi = fdis[i]
-                    bbox = boxes[i] if i < len(boxes) else None
-                    contour = contours[i] if i < len(contours) else None
-                    formatted_teeth_data_012.append(
-                        {"fdi": fdi, "contour": contour, "bbox": bbox}
-                    )
-
-            periapical_data = model_012.predict(
-                current_img,
-                teeth_data=formatted_teeth_data_012,
-                criteria=self.clinical_criteria,
-            )
-            result_report["012_periapical"] = periapical_data
-            if isinstance(periapical_data, dict) and periapical_data.get("error"):
-                module_execution["Dental_012"] = {
-                    "status": "unavailable",
-                    "reason": str(periapical_data.get("error")),
-                }
-            else:
-                module_execution["Dental_012"] = {"status": "executed", "reason": None}
-        else:
-            result_report["012_periapical"] = None
-            module_execution["Dental_012"] = {
-                "status": "unavailable",
-                "reason": "Periapical model not registered",
-            }
-
-        # 6. 013 수복물/보철물 분류
+        # 5. 013 수복물/보철물 분류 (012 치근단 병소 RCT 연계보다 선행 실행)
+        rct_fdis = set()
         model_013 = self.manager.load_to_gpu("013")
         if model_013 is not None:
             formatted_teeth_data_013 = []
@@ -306,11 +277,61 @@ class PanoramicPipeline:
                 }
             else:
                 module_execution["Dental_013"] = {"status": "executed", "reason": None}
+                r_items = (
+                    restoration_data.get("results", [])
+                    if isinstance(restoration_data, dict)
+                    else (restoration_data if isinstance(restoration_data, list) else [])
+                )
+                for r_item in r_items:
+                    cat = str(r_item.get("clinical_category", r_item.get("type", "")))
+                    r_fdi = r_item.get("fdi")
+                    if r_fdi is not None and ("endodontic" in cat.lower() or "rct" in cat.lower()):
+                        try:
+                            rct_fdis.add(int(r_fdi))
+                        except (TypeError, ValueError):
+                            pass
         else:
             result_report["013_restoration"] = None
             module_execution["Dental_013"] = {
                 "status": "unavailable",
                 "reason": "Restoration model not registered",
+            }
+
+        # 6. 012 치근단 병소 탐지 및 FDI·RCT 연계 매칭
+        model_012 = self.manager.load_to_gpu("012")
+        if model_012 is not None:
+            formatted_teeth_data_012 = []
+            if tooth_roi_data and "fdi_labels" in tooth_roi_data:
+                fdis = tooth_roi_data["fdi_labels"]
+                boxes = tooth_roi_data.get("boxes", [])
+                contours = tooth_roi_data.get("contours", [])
+                for i in range(len(fdis)):
+                    fdi = fdis[i]
+                    bbox = boxes[i] if i < len(boxes) else None
+                    contour = contours[i] if i < len(contours) else None
+                    formatted_teeth_data_012.append(
+                        {"fdi": fdi, "contour": contour, "bbox": bbox}
+                    )
+
+            periapical_data = model_012.predict(
+                current_img,
+                teeth_data=formatted_teeth_data_012,
+                criteria=self.clinical_criteria,
+                rct_fdis=sorted(rct_fdis),
+            )
+            result_report["012_periapical"] = periapical_data
+            if isinstance(periapical_data, dict) and periapical_data.get("error"):
+                module_execution["Dental_012"] = {
+                    "status": "unavailable",
+                    "reason": str(periapical_data.get("error")),
+                }
+            else:
+                module_execution["Dental_012"] = {"status": "executed", "reason": None}
+        else:
+            result_report["012_periapical"] = None
+            module_execution["Dental_012"] = {
+                "status": "unavailable",
+                "reason": "Periapical model not registered",
             }
 
         # 7. 009 매복 제3대구치 분석

@@ -69,7 +69,13 @@ def init_003_model():
     return BoneLossEngine(detector_path=det_path, sam_path=sam_path)
 
 
-def calculate_bone_loss(image: np.ndarray, tooth_roi_data: dict, model) -> dict:
+def calculate_bone_loss(
+    image: np.ndarray,
+    tooth_roi_data: dict,
+    model,
+    pixel_spacing_mm=None,
+    is_calibrated: bool = False,
+) -> dict:
     """
     영구치(11~48) 치아별 CEJ-Crest-Apex 방사선학적 골소실(RBL %) 및 물리적 흡수량(mm)을 계산하고,
     임상적으로 유의미한 골소실(Stage II 이상: RBL >= 15.0% 및 흡수량 >= 2.0mm) 부위의
@@ -100,8 +106,17 @@ def calculate_bone_loss(image: np.ndarray, tooth_roi_data: dict, model) -> dict:
             pts_cnt = np.asarray(cnt, dtype=np.int32).reshape(-1, 2)
             cv2.fillPoly(all_teeth_mask, [pts_cnt], 255)
 
-    # Panorama width-adaptive pixel-to-mm calibration (nominal 10 px/mm at 2000px width)
-    eff_px_per_mm = float(model.calibrator.pixels_per_mm) * max(0.8, float(w_img) / 2000.0)
+    # Use physical DICOM spacing when calibrated; otherwise panorama width-adaptive nominal calibration
+    mm_calibrated = False
+    if is_calibrated and pixel_spacing_mm and len(pixel_spacing_mm) >= 2:
+        avg_sp = (float(pixel_spacing_mm[0]) + float(pixel_spacing_mm[1])) / 2.0
+        if avg_sp > 0:
+            eff_px_per_mm = 1.0 / avg_sp
+            mm_calibrated = True
+        else:
+            eff_px_per_mm = float(model.calibrator.pixels_per_mm) * max(0.8, float(w_img) / 2000.0)
+    else:
+        eff_px_per_mm = float(model.calibrator.pixels_per_mm) * max(0.8, float(w_img) / 2000.0)
 
     if fdi_labels and boxes:
         for idx, (fdi, box) in enumerate(zip(fdi_labels, boxes)):
@@ -145,6 +160,7 @@ def calculate_bone_loss(image: np.ndarray, tooth_roi_data: dict, model) -> dict:
                 "distal_rbl_percent": round(d_rbl, 1),
                 "rbl_percent": round(max_rbl, 1),
                 "loss_mm": round(max_mm, 2),
+                "mm_calibrated": mm_calibrated,
                 "stage": site_stage.value,
                 "confidence": round(conf, 2),
             })
@@ -170,6 +186,7 @@ def calculate_bone_loss(image: np.ndarray, tooth_roi_data: dict, model) -> dict:
                     "pts": poly_pts,
                     "rbl_percent": round(max_rbl, 1),
                     "loss_mm": round(max_mm, 2),
+                    "mm_calibrated": mm_calibrated,
                     "stage": site_stage.value,
                     "confidence": round(conf, 2),
                 })
@@ -180,6 +197,7 @@ def calculate_bone_loss(image: np.ndarray, tooth_roi_data: dict, model) -> dict:
         "contours": contours_out,
         "metrics": metrics_out,
         "landmarks": landmarks_out,
+        "mm_calibrated": mm_calibrated,
         "patient_stage": patient_stage.value,
         "patient_extent": patient_extent.value,
         "measurement_method": "radiographic_densitometric_cej_crest_v2",

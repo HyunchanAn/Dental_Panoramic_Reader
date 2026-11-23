@@ -1,14 +1,17 @@
 import os
+import re
 import sys
 import io
+import json
 import time
 import uuid
 import hmac
 import hashlib
+from pathlib import Path
 import numpy as np
 from PIL import Image, UnidentifiedImageError
 from typing import Dict, Any, List, Optional, Tuple
-from fastapi import FastAPI, File, UploadFile, HTTPException, Query, Header
+from fastapi import Body, FastAPI, File, Form, UploadFile, HTTPException, Query, Header
 from fastapi.middleware.cors import CORSMiddleware
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -17,10 +20,20 @@ if os.path.isdir(DENTAL_CORE_DIR) and DENTAL_CORE_DIR not in sys.path:
     sys.path.insert(0, DENTAL_CORE_DIR)
 
 try:
-    from dental_core import strip_phi_tags as _core_strip_phi_tags
+    from dental_core import (
+        PanoramaHiTLDocument,
+        extract_dicom_pixel_spacing as _extract_dicom_pixel_spacing,
+        strip_phi_tags as _core_strip_phi_tags,
+    )
 except ImportError:
+    PanoramaHiTLDocument = None
+    _extract_dicom_pixel_spacing = None
     _core_strip_phi_tags = None
 
+from core.periodontal_risk_gate import (
+    ClinicalMetadataInput,
+    evaluate_periodontal_risk_with_gate,
+)
 from core.pipeline import PanoramicPipeline
 from modules.dental_010_heuristic import verify_missing_teeth
 
@@ -161,6 +174,33 @@ def decode_uploaded_radiograph_in_memory(
     return np.array(image_pil), False
 
 
+def extract_dicom_spacing_from_bytes(
+    contents: bytes,
+    filename: str = "",
+    content_type: str = "",
+) -> Tuple[Optional[Tuple[float, float]], bool]:
+    """Extract physical DICOM PixelSpacing / ImagerPixelSpacing in-memory when available."""
+    if not _is_dicom_payload(contents, filename, content_type):
+        return None, False
+    try:
+        import pydicom
+
+        ds = pydicom.dcmread(io.BytesIO(contents), stop_before_pixels=True, force=True)
+        if _extract_dicom_pixel_spacing is not None:
+            spacing = _extract_dicom_pixel_spacing(ds)
+            if spacing is not None:
+                return spacing, True
+        for tag in ("PixelSpacing", "ImagerPixelSpacing"):
+            val = getattr(ds, tag, None)
+            if val is not None and len(val) >= 2:
+                r_mm, c_mm = float(val[0]), float(val[1])
+                if r_mm > 0 and c_mm > 0:
+                    return (r_mm, c_mm), True
+    except Exception:
+        pass
+    return None, False
+
+
 def normalize_bbox(box: List[float], img_w: int, img_h: int) -> Dict[str, float]:
     """Convert absolute [x1, y1, x2, y2] to normalized {x, y, w, h} (0.0 ~ 1.0)"""
     x1, y1, x2, y2 = map(float, box[:4])
@@ -277,6 +317,9 @@ def format_to_ssot_report(
     filename: str,
     image_hash: str = "",
     preprocessing_id: str = "PRE-VISTA-AUTO-LETTERBOX-v1",
+    pixel_spacing_mm: Optional[Tuple[float, float]] = None,
+    is_calibrated: bool = False,
+    clinical_metadata: Optional[Any] = None,
 ) -> Dict[str, Any]:
     caries_list = []
     bone_loss_list = []
@@ -357,6 +400,7 @@ def format_to_ssot_report(
                         "toothNumber": contour_info.get("fdi", None),
                         "rblPercent": contour_info.get("rbl_percent", None),
                         "lossMm": contour_info.get("loss_mm", None),
+                        "mmCalibrated": bool(contour_info.get("mm_calibrated", is_calibrated)),
                         "stage": contour_info.get("stage", None),
                     }
                 )
@@ -382,38 +426,15 @@ def format_to_ssot_report(
                     "label": "Periapical Lesion",
                     "toothNumber": item.get("fdi", None),
                     "clinicalStatus": item.get("clinical_status", "DEFINITE"),
+                    "rctAssociated": item.get("rct_associated"),
+                    "lesionSubtype": item.get("lesion_subtype"),
                     "isolatedAnatomicalSuspicion": bool(item.get("isolated_anatomical_suspicion", False)),
                 }
             )
 
-    # 4. Detected Teeth (Dental_008) - 32 Tooth BBoxes, FDI Labels & Supernumerary Separation
-    teeth_list = []
-    supernumerary_list = []
-    fdi_labels = tooth_roi.get("fdi_labels", []) if tooth_roi else []
-    boxes = tooth_roi.get("boxes", []) if tooth_roi else []
-    uncertain_flags = tooth_roi.get("uncertain", [False] * len(boxes)) if tooth_roi else []
-    scores = tooth_roi.get("scores", [0.9] * len(boxes)) if tooth_roi else []
-    super_flags = tooth_roi.get("is_supernumerary", [False] * len(boxes)) if tooth_roi else []
-
-    for idx, (fdi, box, unc, sc) in enumerate(zip(fdi_labels, boxes, uncertain_flags, scores)):
-        is_sup = bool(super_flags[idx]) if idx < len(super_flags) else (int(fdi) in {19, 29, 39, 49})
-        norm_box = normalize_bbox(box, pred_w, pred_h)
-        tooth_entry = {
-            "toothNumber": int(fdi),
-            "x": norm_box["x"],
-            "y": norm_box["y"],
-            "w": norm_box["w"],
-            "h": norm_box["h"],
-            "confidence": round(float(sc), 2),
-            "uncertain": bool(unc),
-            "isSupernumerary": is_sup,
-        }
-        teeth_list.append(tooth_entry)
-        if is_sup:
-            supernumerary_list.append(tooth_entry)
-
-    # 5. Restorations & Prosthetics (Dental_013)
+    # 4. Restorations & Prosthetics (Dental_013) collected first to tag teeth
     restorations_list = []
+    tooth_rest_tags_map: Dict[int, List[str]] = {}
     if "013_restoration" in raw_report and raw_report["013_restoration"]:
         r_raw = raw_report["013_restoration"]
         r_items = (
@@ -428,9 +449,18 @@ def format_to_ssot_report(
                 "clinical_category",
                 item.get("type", item.get("raw_class", item.get("class_name", "Restoration"))),
             )
+            r_fdi = item.get("fdi", None)
+            if r_fdi is not None:
+                try:
+                    fdi_int = int(r_fdi)
+                    tags_for_tooth = tooth_rest_tags_map.setdefault(fdi_int, [])
+                    if str(rest_type) not in tags_for_tooth:
+                        tags_for_tooth.append(str(rest_type))
+                except (TypeError, ValueError):
+                    pass
             restorations_list.append(
                 {
-                    "toothNumber": item.get("fdi", None),
+                    "toothNumber": r_fdi,
                     "type": rest_type,
                     "rawClass": item.get("raw_class", None),
                     "confidence": round(float(item.get("confidence", item.get("score", 0.85))), 2),
@@ -440,6 +470,47 @@ def format_to_ssot_report(
                     "h": norm_box["h"],
                 }
             )
+
+    # 5. Detected Teeth (Dental_008) - 32 Tooth BBoxes, FDI Labels & Supernumerary Separation
+    teeth_list = []
+    supernumerary_list = []
+    fdi_labels = tooth_roi.get("fdi_labels", []) if tooth_roi else []
+    boxes = tooth_roi.get("boxes", []) if tooth_roi else []
+    contours_008 = tooth_roi.get("contours", []) if tooth_roi else []
+    uncertain_flags = tooth_roi.get("uncertain", [False] * len(boxes)) if tooth_roi else []
+    scores = tooth_roi.get("scores", [0.9] * len(boxes)) if tooth_roi else []
+    super_flags = tooth_roi.get("is_supernumerary", [False] * len(boxes)) if tooth_roi else []
+
+    for idx, (fdi, box, unc, sc) in enumerate(zip(fdi_labels, boxes, uncertain_flags, scores)):
+        fdi_int = int(fdi)
+        is_sup = bool(super_flags[idx]) if idx < len(super_flags) else (fdi_int in {19, 29, 39, 49})
+        norm_box = normalize_bbox(box, pred_w, pred_h)
+        poly_norm = None
+        if idx < len(contours_008) and contours_008[idx] is not None and len(contours_008[idx]) >= 3:
+            raw_cnt = np.asarray(contours_008[idx], dtype=np.float32).reshape(-1, 2)
+            poly_norm = [
+                {
+                    "x": round(max(0.0, min(1.0, float(pt[0]) / float(pred_w))), 4),
+                    "y": round(max(0.0, min(1.0, float(pt[1]) / float(pred_h))), 4),
+                }
+                for pt in raw_cnt
+            ]
+        tooth_entry = {
+            "toothNumber": fdi_int,
+            "x": norm_box["x"],
+            "y": norm_box["y"],
+            "w": norm_box["w"],
+            "h": norm_box["h"],
+            "confidence": round(float(sc), 2),
+            "uncertain": bool(unc),
+            "isSupernumerary": is_sup,
+            "restorationTags": list(tooth_rest_tags_map.get(fdi_int, [])),
+        }
+        if poly_norm:
+            tooth_entry["polygon"] = poly_norm
+        teeth_list.append(tooth_entry)
+        if is_sup:
+            supernumerary_list.append(tooth_entry)
 
     # 6. Impacted Teeth (Dental_009)
     impacted_list = []
@@ -663,6 +734,34 @@ def format_to_ssot_report(
         else f"ANON-{uuid.uuid4().hex[:12].upper()}"
     )
 
+    findings_payload: Dict[str, Any] = {
+        "teeth": teeth_list,
+        "supernumeraryTeeth": supernumerary_list,
+        "caries": caries_list,
+        "boneLoss": bone_loss_list,
+        "periapicalLesions": periapical_list,
+        "restorations": restorations_list,
+        "impactedTeeth": impacted_list,
+        "missingTeeth": missing_analysis,
+        "osteoporosisRisk": osteo_risk,
+        "ageEstimation": age_estimation,
+        "moduleExecutionStatus": module_execution_status,
+        "clinicalSynthesis": clinical_synthesis,
+    }
+    findings_payload["periodontalRiskAssessment"] = evaluate_periodontal_risk_with_gate(
+        raw_report,
+        findings_payload,
+        clinical_meta=clinical_metadata,
+    )
+
+    source_ext = Path(filename).suffix.lstrip(".").upper() or "PNG"
+    if source_ext in ("DCM", "DICOM"):
+        source_fmt = "DICOM"
+    elif source_ext in ("JPG", "JPEG"):
+        source_fmt = "JPEG"
+    else:
+        source_fmt = source_ext
+
     return {
         "reportId": f"REP-{int(time.time())}",
         "patientId": anon_patient_id,
@@ -675,23 +774,13 @@ def format_to_ssot_report(
             "sha256_hash": image_hash,
             "preprocessing_id": preprocessing_id,
             "fdiStatus": fdi_status,
+            "source_format": source_fmt,
+            "pixel_spacing_mm": list(pixel_spacing_mm) if pixel_spacing_mm else None,
+            "is_calibrated": bool(is_calibrated and pixel_spacing_mm is not None),
             "moduleVersions": raw_report.get("module_versions", {}),
             "moduleExecutionStatus": module_execution_status,
         },
-        "findings": {
-            "teeth": teeth_list,
-            "supernumeraryTeeth": supernumerary_list,
-            "caries": caries_list,
-            "boneLoss": bone_loss_list,
-            "periapicalLesions": periapical_list,
-            "restorations": restorations_list,
-            "impactedTeeth": impacted_list,
-            "missingTeeth": missing_analysis,
-            "osteoporosisRisk": osteo_risk,
-            "ageEstimation": age_estimation,
-            "moduleExecutionStatus": module_execution_status,
-            "clinicalSynthesis": clinical_synthesis,
-        },
+        "findings": findings_payload,
         "summary": summary_text,
     }
 
@@ -911,10 +1000,21 @@ def _verify_api_token(x_api_token: Optional[str], authorization: Optional[str]) 
 def infer_panoramic(
     file: UploadFile = File(...),
     use_004: bool = Query(False, description="Enable Dental_004 Super-Resolution preprocessing"),
+    clinical_metadata: Optional[str] = Form(default=None),
     x_api_token: Optional[str] = Header(default=None),
     authorization: Optional[str] = Header(default=None),
 ):
     _verify_api_token(x_api_token, authorization)
+
+    parsed_clinical_meta: Optional[ClinicalMetadataInput] = None
+    if clinical_metadata is not None and clinical_metadata.strip():
+        try:
+            parsed_clinical_meta = ClinicalMetadataInput.from_payload(clinical_metadata)
+        except (ValueError, json.JSONDecodeError) as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid clinical_metadata payload: {exc}",
+            )
 
     filename = file.filename or "panoramic.png"
     content_type = file.content_type or ""
@@ -944,13 +1044,28 @@ def infer_panoramic(
         img_np, is_dicom = decode_uploaded_radiograph_in_memory(
             contents, filename=filename, content_type=content_type
         )
+        pixel_spacing_mm, is_calibrated = (
+            extract_dicom_spacing_from_bytes(contents, filename=filename, content_type=content_type)
+            if is_dicom
+            else (None, False)
+        )
         img_h, img_w = img_np.shape[:2]
     except (Image.DecompressionBombError, UnidentifiedImageError, OSError, ValueError):
         raise HTTPException(status_code=400, detail="Invalid or oversized image/DICOM file.")
 
     try:
         pipe = get_pipeline(use_004=use_004)
-        raw_results = pipe.run(img_np)
+        if is_calibrated and pixel_spacing_mm is not None:
+            try:
+                raw_results = pipe.run(
+                    img_np,
+                    pixel_spacing_mm=pixel_spacing_mm,
+                    is_calibrated=is_calibrated,
+                )
+            except TypeError:
+                raw_results = pipe.run(img_np)
+        else:
+            raw_results = pipe.run(img_np)
 
         if is_dicom:
             preprocessing_id = (
@@ -972,6 +1087,9 @@ def infer_panoramic(
             filename,
             image_hash=image_hash,
             preprocessing_id=preprocessing_id,
+            pixel_spacing_mm=pixel_spacing_mm,
+            is_calibrated=is_calibrated,
+            clinical_metadata=parsed_clinical_meta,
         )
         return final_report
 
@@ -987,6 +1105,55 @@ def infer_panoramic(
             status_code=500,
             detail=f"Internal inference pipeline error (request_id={request_id}).",
         )
+
+
+def _get_hitl_storage_dir() -> Path:
+    custom = os.environ.get("DPR_HITL_STORAGE_DIR", "").strip()
+    if custom:
+        target = Path(custom)
+    else:
+        target = Path(BASE_DIR) / "data" / "hitl_golden"
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+@app.post("/api/v1/hitl/save")
+def save_hitl_golden_document(
+    payload: Dict[str, Any] = Body(...),
+    x_api_token: Optional[str] = Header(default=None),
+    authorization: Optional[str] = Header(default=None),
+):
+    _verify_api_token(x_api_token, authorization)
+    if PanoramaHiTLDocument is None:
+        raise HTTPException(status_code=503, detail="Dental_Core PanoramaHiTLDocument schema unavailable.")
+
+    try:
+        doc = PanoramaHiTLDocument.from_dict(payload)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid PanoramaHiTLDocument payload: {exc}")
+
+    safe_doc_id = re.sub(r"[^A-Za-z0-9_.-]", "_", doc.document_id) or f"HITL-{uuid.uuid4().hex[:12].upper()}"
+    out_dir = _get_hitl_storage_dir()
+    saved_path = doc.save_json(out_dir / f"{safe_doc_id}.json")
+    return {
+        "status": "saved",
+        "document_id": doc.document_id,
+        "saved_path": str(saved_path.name),
+    }
+
+
+@app.get("/api/v1/hitl/{document_id}")
+def get_hitl_golden_document(
+    document_id: str,
+    x_api_token: Optional[str] = Header(default=None),
+    authorization: Optional[str] = Header(default=None),
+):
+    _verify_api_token(x_api_token, authorization)
+    safe_doc_id = re.sub(r"[^A-Za-z0-9_.-]", "_", document_id)
+    target_path = _get_hitl_storage_dir() / f"{safe_doc_id}.json"
+    if not target_path.exists():
+        raise HTTPException(status_code=404, detail="HiTL document not found.")
+    return json.loads(target_path.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
