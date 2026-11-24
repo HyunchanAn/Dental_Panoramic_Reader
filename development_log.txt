@@ -67,3 +67,6 @@
   - `api_server.py`: `POST /api/v1/infer`의 `clinical_metadata` Form 연동, `findings.periodontalRiskAssessment` 탑재, 치아별 `restorationTags` 전파, 그리고 `Dental_015` HiTL Golden JSON 저장·조회 엔드포인트(`POST /api/v1/hitl/save`, `GET /api/v1/hitl/{document_id}`) 추가.
 - 이슈 #15 코드 준비 항목 완료 (`[P2][배포] 웹 조회용 배포 준비`):
   - CPU 전용 `requirements-cpu.txt` 분리, `Dockerfile` 서브모듈 자동 초기화 및 컨테이너 시작 시 `setup_env.py` 가중치 자동 다운로드 엔트리포인트(`docker_entrypoint.sh`), 비공개 Hugging Face Space 배포 워크플로우(`.github/workflows/deploy-hf-space.yml`) 추가 및 최신 서브모듈 커밋 동기화 완료.
+
+2026-11-24
+- 이슈 #15 추후 실배포 재개용 Hugging Face `Write` 토큰 신규 발급 주의사항 및 4단계 배포 마감 절차를 `plans_replies_walkthrough/261124_1624_HF_Private_Space_Token_and_Deploy_Runbook.md`에 기록 완료.
