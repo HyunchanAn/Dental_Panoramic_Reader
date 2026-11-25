@@ -12,15 +12,17 @@ class AgePredictorWrapper(BasePanoramicPredictor):
 
     def load_model(self) -> None:
         if self.session is None:
-            if os.path.exists(self.model_path):
-                # Load ONNX model with CPU and CUDA providers
-                providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
-                try:
-                    self.session = ort.InferenceSession(self.model_path, providers=providers)
-                except Exception as e:
-                    print(f"Error loading Age Predictor ONNX: {e}")
-            else:
+            if not self.model_path or not os.path.exists(self.model_path):
                 print(f"Warning: Model not found at {self.model_path}. Age predictor will not work.")
+                return
+            if not self.model_path.lower().endswith(".onnx"):
+                print(f"Warning: AgePredictorWrapper expects an .onnx model, skipping {self.model_path}.")
+                return
+            providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
+            try:
+                self.session = ort.InferenceSession(self.model_path, providers=providers)
+            except Exception as e:
+                print(f"Error loading Age Predictor ONNX: {e}")
 
     def unload_model(self) -> None:
         if self.session is not None:

@@ -5,6 +5,10 @@ import torch
 
 from ultralytics import YOLO
 from modules.Dental_008.src.numbering.fdi_corrector import correct_fdi_numbers
+try:
+    from modules.Dental_008.src.numbering.fdi_assigner import assign_fdi_labels
+except ImportError:
+    assign_fdi_labels = None
 from .base_predictor import BasePanoramicPredictor
 
 class SegmentationPredictorWrapper(BasePanoramicPredictor):
@@ -57,11 +61,19 @@ class SegmentationPredictorWrapper(BasePanoramicPredictor):
             }
             
         boxes = res.boxes.xyxy.cpu().numpy()
+        scores = res.boxes.conf.cpu().numpy()
         yolo_labels = res.boxes.cls.cpu().numpy()
         masks = res.masks.data
-        
-        # 기하학적 FDI 번호 보정 (DP 알고리즘)
-        corrected_labels = correct_fdi_numbers(boxes, yolo_labels)
+        h_img, w_img = img_bgr.shape[:2]
+
+        # 2-Stage FDI assignment + DP correction
+        if assign_fdi_labels is not None:
+            assigned_labels = assign_fdi_labels(
+                torch.as_tensor(boxes), torch.as_tensor(scores), w_img, h_img
+            )
+            corrected_labels = correct_fdi_numbers(boxes, assigned_labels)
+        else:
+            corrected_labels = correct_fdi_numbers(boxes, yolo_labels)
         
         teeth_data = []
         for i in range(len(boxes)):

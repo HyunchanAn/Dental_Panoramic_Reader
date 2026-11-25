@@ -60,7 +60,12 @@ class OsteoporosisPredictorWrapper(BasePanoramicPredictor):
             }
 
         try:
-            pil_img = Image.fromarray(image)
+            img_rgb = (
+                cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                if image.ndim == 3 and image.shape[2] == 3
+                else image
+            )
+            pil_img = Image.fromarray(img_rgb)
             pred_class, probs, _, geom_feats = self.inferencer.predict(pil_img)
 
             p_normal = float(probs.get("Normal", 0.0))

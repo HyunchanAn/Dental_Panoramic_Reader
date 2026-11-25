@@ -3,9 +3,13 @@ import os
 import numpy as np
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-missing_src_path = os.path.join(BASE_DIR, "modules", "Dental_010", "src")
-if missing_src_path not in sys.path:
-    sys.path.insert(0, missing_src_path)
+for _p in (
+    os.path.join(BASE_DIR, "modules", "Dental_Core"),
+    os.path.join(os.path.dirname(BASE_DIR), "Dental_Core"),
+    os.path.join(BASE_DIR, "modules", "Dental_010", "src"),
+):
+    if os.path.isdir(_p) and _p not in sys.path:
+        sys.path.insert(0, _p)
 
 from detector import MissingToothDetector
 from .base_predictor import BasePanoramicPredictor

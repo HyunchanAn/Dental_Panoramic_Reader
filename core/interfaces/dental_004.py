@@ -59,41 +59,52 @@ def init_004_model():
         return None, None
 
 def run_super_resolution(image: np.ndarray, model, config, device) -> np.ndarray:
-    """초해상화 파이프라인 수행 (모델 부재 시 원본 보존)"""
+    """Run SwinIR super-resolution tiling pipeline (preserves input when model is unavailable)."""
     if model is None or config is None:
         return image
-    preprocessor = PanoPreprocessor()
-    tiler = PanoTiler(tile_size=config['dataset']['patch_size'], overlap=32, upscale=config['model']['upscale'])
-    
-    # 1. 흑백 변환 및 정규화
-    if len(image.shape) == 3:
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    
-    img_tensor = torch.from_numpy(image).float().unsqueeze(0).unsqueeze(0) / 255.0
-    img_tensor = img_tensor.to(device)
-    
-    # 2. 타일링 추론
+    upscale = int(config['model']['upscale'])
+    tile_size = int(config['dataset']['patch_size'])
+    overlap = min(32, max(8, tile_size // 4))
+    tiler = PanoTiler(tile_size=tile_size, overlap=overlap, upscale=upscale)
+
+    # 1. Grayscale conversion & normalization -> (C, H, W)
+    if image.ndim == 3:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = image
+
+    orig_h, orig_w = gray.shape[:2]
+    pad_h = max(0, tile_size - orig_h)
+    pad_w = max(0, tile_size - orig_w)
+    if pad_h > 0 or pad_w > 0:
+        gray_padded = cv2.copyMakeBorder(gray, 0, pad_h, 0, pad_w, cv2.BORDER_REFLECT_101)
+    else:
+        gray_padded = gray
+
+    h_pad, w_pad = gray_padded.shape[:2]
+    img_chw = torch.from_numpy(gray_padded).float().unsqueeze(0).to(device) / 255.0
+
+    # 2. Tiled inference using PanoTiler.tile_image / merge_tiles
     with torch.no_grad():
-        tiles, positions = tiler.extract_tiles(img_tensor)
+        tiles, coords = tiler.tile_image(img_chw)
         out_tiles = []
-        for tile in tiles:
-            # 패딩 처리
-            _, _, h, w = tile.shape
-            pad_h = (8 - h % 8) % 8
-            pad_w = (8 - w % 8) % 8
-            if pad_h > 0 or pad_w > 0:
-                tile = torch.nn.functional.pad(tile, (0, pad_w, 0, pad_h), 'reflect')
-                
+        for idx in range(tiles.shape[0]):
+            tile = tiles[idx : idx + 1]
+            _, _, th, tw = tile.shape
+            t_pad_h = (8 - th % 8) % 8
+            t_pad_w = (8 - tw % 8) % 8
+            if t_pad_h > 0 or t_pad_w > 0:
+                tile = torch.nn.functional.pad(tile, (0, t_pad_w, 0, t_pad_h), 'reflect')
             out_tile = model(tile)
-            
-            # 패딩 제거
-            if pad_h > 0 or pad_w > 0:
-                out_tile = out_tile[:, :, :h * config['model']['upscale'], :w * config['model']['upscale']]
-                
+            if t_pad_h > 0 or t_pad_w > 0:
+                out_tile = out_tile[:, :, : th * upscale, : tw * upscale]
             out_tiles.append(out_tile)
-            
-        out_tensor = tiler.merge_tiles(out_tiles, positions, (img_tensor.shape[2], img_tensor.shape[3]))
-        
-    out_img = out_tensor.squeeze().cpu().numpy()
-    out_img = np.clip(out_img * 255.0, 0, 255).astype(np.uint8)
-    return out_img
+
+        stacked_out = torch.cat(out_tiles, dim=0)
+        out_tensor = tiler.merge_tiles(stacked_out, coords, (1, h_pad * upscale, w_pad * upscale))
+
+    out_gray = out_tensor.squeeze(0).cpu().numpy()
+    out_gray = out_gray[: orig_h * upscale, : orig_w * upscale]
+    out_gray = np.clip(out_gray * 255.0, 0, 255).astype(np.uint8)
+    # Return 3-channel BGR so downstream Dental_008 (h, w, _ = image.shape) never crashes
+    return cv2.cvtColor(out_gray, cv2.COLOR_GRAY2BGR)

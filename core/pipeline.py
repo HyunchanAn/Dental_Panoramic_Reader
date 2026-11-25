@@ -117,8 +117,8 @@ class PanoramicPipeline:
             self.manager.register_model("003", model_003)
 
         model_011_candidates = [
+            os.path.join(base_dir, "modules", "Dental_011", "models", "best_hybrid_age_model.onnx"),
             os.path.join(base_dir, "modules", "Dental_011", "models", "age_resnet50.onnx"),
-            os.path.join(base_dir, "modules", "Dental_011", "models", "best_model.pth"),
         ]
         model_011_path = next(
             (p for p in model_011_candidates if os.path.exists(p)),
@@ -173,11 +173,17 @@ class PanoramicPipeline:
         # 1. 004 화질 개선 (Optional)
         if self.use_004:
             model_004 = self.manager.load_to_gpu("004")
-            current_img = run_super_resolution(
-                current_img, model_004, self.config_004, self.device
-            )
-            result_report["004_image"] = current_img
-            module_execution["Dental_004"] = {"status": "executed", "reason": None}
+            if model_004 is not None and self.config_004 is not None:
+                current_img = run_super_resolution(
+                    current_img, model_004, self.config_004, self.device
+                )
+                result_report["004_image"] = current_img
+                module_execution["Dental_004"] = {"status": "executed", "reason": None}
+            else:
+                module_execution["Dental_004"] = {
+                    "status": "unavailable",
+                    "reason": "SwinIR weights or config unavailable",
+                }
         else:
             module_execution["Dental_004"] = {"status": "skipped", "reason": "use_004=False"}
 
@@ -198,8 +204,10 @@ class PanoramicPipeline:
             module_execution["Dental_008"] = {"status": "executed", "reason": None}
         else:
             module_execution["Dental_008"] = {
-                "status": "unavailable" if model_008 is None else "executed",
-                "reason": "FDI segmentation model unavailable" if model_008 is None else None,
+                "status": "unavailable",
+                "reason": "FDI segmentation model unavailable"
+                if model_008 is None
+                else "FDI numbering failed (FDI_UNAVAILABLE)",
             }
 
         # 3. 002 우식 및 병소 탐지 (2-Stage 치아 패치 연계)
@@ -353,30 +361,46 @@ class PanoramicPipeline:
                 ):
                     tooth_dict[fdi] = box
 
+            contours_008 = tooth_roi_data.get("contours", []) if tooth_roi_data else []
+            fdi_list_008 = tooth_roi_data.get("fdi_labels", []) if tooth_roi_data else []
+            contour_dict = {
+                int(f): contours_008[idx]
+                for idx, f in enumerate(fdi_list_008)
+                if idx < len(contours_008) and contours_008[idx] is not None and len(contours_008[idx]) >= 3
+            }
+
             for m3_fdi, m2_fdi in pairs:
                 if m3_fdi in tooth_dict:
                     m3_box = tooth_dict[m3_fdi]
                     m2_box = tooth_dict.get(m2_fdi)
 
-                    m3_pts = np.array(
-                        [
-                            [m3_box[0], m3_box[1]],
-                            [m3_box[2], m3_box[1]],
-                            [m3_box[2], m3_box[3]],
-                            [m3_box[0], m3_box[3]],
-                        ],
-                        dtype=np.int32,
+                    m3_pts = (
+                        np.asarray(contour_dict[m3_fdi], dtype=np.int32)
+                        if m3_fdi in contour_dict
+                        else np.array(
+                            [
+                                [m3_box[0], m3_box[1]],
+                                [m3_box[2], m3_box[1]],
+                                [m3_box[2], m3_box[3]],
+                                [m3_box[0], m3_box[3]],
+                            ],
+                            dtype=np.int32,
+                        )
                     )
 
                     if m2_box is not None:
-                        m2_pts = np.array(
-                            [
-                                [m2_box[0], m2_box[1]],
-                                [m2_box[2], m2_box[1]],
-                                [m2_box[2], m2_box[3]],
-                                [m2_box[0], m2_box[3]],
-                            ],
-                            dtype=np.int32,
+                        m2_pts = (
+                            np.asarray(contour_dict[m2_fdi], dtype=np.int32)
+                            if m2_fdi in contour_dict
+                            else np.array(
+                                [
+                                    [m2_box[0], m2_box[1]],
+                                    [m2_box[2], m2_box[1]],
+                                    [m2_box[2], m2_box[3]],
+                                    [m2_box[0], m2_box[3]],
+                                ],
+                                dtype=np.int32,
+                            )
                         )
                         res = analyzer_009.analyze_impacted_tooth(
                             m3_pts, m3_fdi, m2_pts
@@ -443,7 +467,7 @@ class PanoramicPipeline:
                 teeth_data=formatted_teeth_data_011 if formatted_teeth_data_011 else None,
             )
             result_report["011_age"] = age_data
-            if isinstance(age_data, dict) and "predicted_age" in age_data:
+            if isinstance(age_data, dict) and age_data.get("predicted_age") is not None:
                 module_execution["Dental_011"] = {"status": "executed", "reason": None}
             else:
                 module_execution["Dental_011"] = {

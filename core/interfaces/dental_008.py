@@ -66,6 +66,20 @@ def run_tooth_segmentation(image: np.ndarray, model, device, conf_threshold=0.20
     YOLOv8 및 2-Stage Sequence Matcher를 사용하여 치아 식별 및 영역 분할을 수행합니다.
     임상 기준 SSOT(과잉치 SEPARATE_ENTITY 정책) 및 하류 호환성(contours 추출)을 지원합니다.
     """
+    if model is None:
+        return {
+            "boxes": [],
+            "masks": [],
+            "contours": [],
+            "fdi_labels": [],
+            "scores": [],
+            "uncertain": [],
+            "is_supernumerary": [],
+            "fdi_status": "FDI_UNAVAILABLE",
+        }
+
+    if image.ndim == 2:
+        image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
     h, w, _ = image.shape
     
     # YOLO 추론 (Main Workstation RTX 5080 verified optimal: conf=0.20, iou=0.50)

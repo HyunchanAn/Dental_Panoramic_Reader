@@ -58,10 +58,10 @@ def init_003_model():
         os.path.join(weights_dir, "best.pt"),
         os.path.join(weights_dir, "best.onnx"),
     ]
+    # PyTorch sam_model_registry only accepts .pth checkpoints (never pass .onnx)
     sam_candidates = [
         os.path.join(models_dir, "sam_vit_b_01ec64.pth"),
-        os.path.join(models_dir, "sam_vit_b_01ec64.onnx"),
-        os.path.join(weights_dir, "sam_vit_b_01ec64.onnx"),
+        os.path.join(weights_dir, "sam_vit_b_01ec64.pth"),
     ]
     det_path = next((p for p in det_candidates if os.path.exists(p)), None)
     sam_path = next((p for p in sam_candidates if os.path.exists(p)), None)

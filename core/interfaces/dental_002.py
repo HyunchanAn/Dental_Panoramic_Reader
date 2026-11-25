@@ -129,8 +129,11 @@ def run_caries_detection(image: np.ndarray, model, tooth_boxes: list = None, mar
                         if bw <= 2 or bh <= 2:
                             continue
                         
+                        cls_name = str(res.names[int(rcls)])
+                        if "periapical" in cls_name.lower():
+                            continue
                         boxes.append(np.array([gx1, gy1, gx2, gy2], dtype=np.float32))
-                        labels.append(res.names[int(rcls)])
+                        labels.append(cls_name)
                         scores.append(float(rconf))
                         
             return {'boxes': boxes, 'labels': labels, 'scores': scores}
@@ -144,8 +147,11 @@ def run_caries_detection(image: np.ndarray, model, tooth_boxes: list = None, mar
             if len(results) > 0:
                 result = results[0]
                 for box, cls, conf in zip(result.boxes.xyxy.cpu().numpy(), result.boxes.cls.cpu().numpy(), result.boxes.conf.cpu().numpy()):
+                    cls_name = str(result.names[int(cls)])
+                    if "periapical" in cls_name.lower():
+                        continue
                     boxes.append(box)
-                    labels.append(result.names[int(cls)])
+                    labels.append(cls_name)
                     scores.append(float(conf))
         except Exception as e:
             print(f"Caries detection warning: {e}")

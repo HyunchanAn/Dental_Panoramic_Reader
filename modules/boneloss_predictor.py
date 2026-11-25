@@ -1,10 +1,15 @@
 import os
+import sys
 import numpy as np
 import torch
 import torchvision.transforms as transforms
 import torchvision.models as vision_models
 import onnxruntime as ort
 from PIL import Image
+
+_d003_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "Dental_003"))
+if os.path.isdir(_d003_root) and _d003_root not in sys.path:
+    sys.path.insert(0, _d003_root)
 
 from modules.Dental_003.models.detector import ToothDetector
 from modules.Dental_003.models.landmark import PerioLandmarkPredictor
@@ -68,7 +73,9 @@ class BoneLossPredictorWrapper(BasePanoramicPredictor):
                 b = tooth.get("bbox")
                 if fdi is None or b is None or len(b) != 4: continue
                 
-                lms = self.landmark.predict_landmarks(image, b)
+                x1, y1, x2, y2 = map(float, b[:4])
+                cx_cy_wh = [(x1 + x2) / 2.0, (y1 + y2) / 2.0, x2 - x1, y2 - y1]
+                lms = self.landmark.predict_landmarks(image, cx_cy_wh)
                 m_rbl = calculate_rbl(lms["mesial_cej"], lms["mesial_crest"], lms["root_apex"])
                 d_rbl = calculate_rbl(lms["distal_cej"], lms["distal_crest"], lms["root_apex"])
                 max_rbl = max(m_rbl, d_rbl)
@@ -89,7 +96,9 @@ class BoneLossPredictorWrapper(BasePanoramicPredictor):
             dets = self.detector.predict(image)
             for d in dets:
                 t_num, b = d["tooth_number"], d["bbox"]
-                lms = self.landmark.predict_landmarks(image, b)
+                x1, y1, x2, y2 = map(float, b[:4])
+                cx_cy_wh = [(x1 + x2) / 2.0, (y1 + y2) / 2.0, x2 - x1, y2 - y1]
+                lms = self.landmark.predict_landmarks(image, cx_cy_wh)
                 m_rbl = calculate_rbl(lms["mesial_cej"], lms["mesial_crest"], lms["root_apex"])
                 d_rbl = calculate_rbl(lms["distal_cej"], lms["distal_crest"], lms["root_apex"])
                 max_rbl = max(m_rbl, d_rbl)

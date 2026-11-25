@@ -43,6 +43,7 @@ MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(30 * 1024 * 1024))
 DEFAULT_ALLOWED_ORIGINS = (
     "http://localhost:3000,http://127.0.0.1:3000,"
     "http://localhost:5173,http://127.0.0.1:5173,"
+    "http://localhost:7860,http://127.0.0.1:7860,"
     "http://localhost:8000,http://127.0.0.1:8000"
 )
 
@@ -57,7 +58,14 @@ def get_allowed_origins() -> List[str]:
         for origin in raw_origins.split(",")
         if origin.strip() and origin.strip() != "*"
     ]
-    return origins or ["http://localhost:5173", "http://127.0.0.1:5173"]
+    return origins or [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:7860",
+        "http://127.0.0.1:7860",
+    ]
 
 
 ALLOWED_ORIGINS = get_allowed_origins()
@@ -245,12 +253,20 @@ def _build_module_execution_status(raw_report: Dict[str, Any], fdi_status: str) 
             }
         return {"status": default_status, "reason": default_reason}
 
-    has_008 = "008_tooth_data" in raw_report and raw_report["008_tooth_data"] is not None
-    status_map["Dental_008"] = _entry(
-        "Dental_008",
-        "executed" if (has_008 and fdi_status != "FDI_UNAVAILABLE") else "unavailable",
-        None if (has_008 and fdi_status != "FDI_UNAVAILABLE") else "FDI segmentation unavailable",
+    status_map["Dental_004"] = _entry(
+        "Dental_004",
+        "executed" if "004_image" in raw_report and raw_report["004_image"] is not None else "skipped",
+        None if "004_image" in raw_report and raw_report["004_image"] is not None else "use_004=False",
     )
+
+    has_008 = "008_tooth_data" in raw_report and raw_report["008_tooth_data"] is not None
+    if not has_008 or fdi_status == "FDI_UNAVAILABLE":
+        status_map["Dental_008"] = {
+            "status": "unavailable",
+            "reason": "FDI segmentation unavailable" if not has_008 else "FDI numbering failed (FDI_UNAVAILABLE)",
+        }
+    else:
+        status_map["Dental_008"] = _entry("Dental_008", "executed", None)
     status_map["Dental_002"] = _entry(
         "Dental_002",
         "executed" if "002_lesions" in raw_report and raw_report["002_lesions"] is not None else "unavailable",
@@ -369,6 +385,7 @@ def format_to_ssot_report(
                     "w": norm_box["w"],
                     "h": norm_box["h"],
                     "confidence": conf,
+                    "clinicalStatus": "DEFINITE" if conf >= 0.45 else "REVIEW_REQUIRED",
                     "label": lesion.get("lesion_type", "Dental Caries"),
                     "toothNumber": fdi_num,
                     "fdi_label": fdi_label,
@@ -450,17 +467,18 @@ def format_to_ssot_report(
                 item.get("type", item.get("raw_class", item.get("class_name", "Restoration"))),
             )
             r_fdi = item.get("fdi", None)
+            r_fdi_int: Optional[int] = None
             if r_fdi is not None:
                 try:
-                    fdi_int = int(r_fdi)
-                    tags_for_tooth = tooth_rest_tags_map.setdefault(fdi_int, [])
+                    r_fdi_int = int(r_fdi)
+                    tags_for_tooth = tooth_rest_tags_map.setdefault(r_fdi_int, [])
                     if str(rest_type) not in tags_for_tooth:
                         tags_for_tooth.append(str(rest_type))
                 except (TypeError, ValueError):
-                    pass
+                    r_fdi_int = None
             restorations_list.append(
                 {
-                    "toothNumber": r_fdi,
+                    "toothNumber": r_fdi_int,
                     "type": rest_type,
                     "rawClass": item.get("raw_class", None),
                     "confidence": round(float(item.get("confidence", item.get("score", 0.85))), 2),
@@ -541,7 +559,7 @@ def format_to_ssot_report(
         missing_analysis = {
             "verified_missing": [],
             "uncertain_missing": [],
-            "gap_details": [],
+            "details": [],
             "status": "FDI_UNAVAILABLE",
         }
     else:
@@ -1091,6 +1109,13 @@ def infer_panoramic(
             is_calibrated=is_calibrated,
             clinical_metadata=parsed_clinical_meta,
         )
+        if is_dicom:
+            import base64
+
+            ok_enc, png_buf = cv2.imencode(".png", img_np)
+            if ok_enc:
+                b64 = base64.b64encode(png_buf.tobytes()).decode("ascii")
+                final_report["imageMetadata"]["previewImageDataUrl"] = f"data:image/png;base64,{b64}"
         return final_report
 
     except HTTPException:

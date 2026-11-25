@@ -27,6 +27,7 @@ def verify_missing_teeth(
             "verified_missing": [],
             "uncertain_missing": candidate_missing,
             "details": [{
+                "fdi": 0,
                 "status": "UNVERIFIED_NO_TEETH_DETECTED",
                 "reason": "No teeth detected in image. Missing teeth analysis requires teeth boundaries."
             }]
@@ -38,6 +39,7 @@ def verify_missing_teeth(
             "verified_missing": [],
             "uncertain_missing": candidate_missing,
             "details": [{
+                "fdi": 0,
                 "status": "UNVERIFIED_INSUFFICIENT_TEETH",
                 "reason": f"Only {len(boxes)} teeth detected (threshold: 8). Risk of image truncation or severe occlusion."
             }]
@@ -73,21 +75,24 @@ def verify_missing_teeth(
         # 예: 16번 결손 후보 -> 인접한 15번, 17번 탐색
         quadrant = missing_fdi // 10
         pos = missing_fdi % 10
-        
-        mesial_fdi = missing_fdi - 1 if pos > 1 else missing_fdi + 10 # 정중선 방향
-        distal_fdi = missing_fdi + 1 if pos < 8 else None            # 후방 방향
+
+        if pos > 1:
+            mesial_fdi = missing_fdi - 1
+        else:
+            contralateral_q = {1: 2, 2: 1, 3: 4, 4: 3}.get(quadrant, quadrant)
+            mesial_fdi = contralateral_q * 10 + 1
+        distal_fdi = missing_fdi + 1 if pos < 8 else None
 
         left_box = fdi_to_box.get(mesial_fdi)
         right_box = fdi_to_box.get(distal_fdi) if distal_fdi else None
 
         if left_box is not None and right_box is not None:
-            # 좌우 인접치 X-중심간 거리 계산
             left_center_x = (left_box[0] + left_box[2]) / 2.0
             right_center_x = (right_box[0] + right_box[2]) / 2.0
             gap_distance = abs(right_center_x - left_center_x)
             r_gap = gap_distance / avg_tooth_width if avg_tooth_width > 0 else 0.0
 
-            if r_gap > 0.65:
+            if r_gap >= 1.55:
                 verified_missing.append(missing_fdi)
                 details.append({
                     "fdi": missing_fdi,

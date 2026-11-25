@@ -3,9 +3,9 @@ import torch
 import torch.nn as nn
 from torchvision.models import mobilenet_v3_small
 
-def export_classifier():
+def export_classifier(pt_path: str = None):
     device = torch.device('cpu')
-    pt_path = "/Users/hyunchanan/.cache/huggingface/hub/models--chemahc94--Dental_003/snapshots/b1c5fe275ef3ccc6124498b6c5d04eda16ab4fb3/pano_classifier.pt"
+    pt_path = pt_path or os.getenv("PANO_CLASSIFIER_PT", "modules/Dental_003/models/pano_classifier.pt")
     onnx_path = "modules/Dental_003/models/pano_classifier.onnx"
     
     os.makedirs(os.path.dirname(onnx_path), exist_ok=True)

@@ -39,8 +39,11 @@ def run_benchmark(image_path="test_images_PANO/sample1.png"):
 
     # 3. End-to-End Inference
     print("\nStarting E2E Inference...")
+    img_bgr = cv2.imread(image_path)
+    if img_bgr is None:
+        raise FileNotFoundError(f"Failed to decode benchmark image: {image_path}")
     start_time = time.time()
-    result_json = pipeline.run(image_path)
+    result_json = pipeline.run(img_bgr)
     inference_time = time.time() - start_time
     
     print(f"\n[3] E2E Inference Time (Latency): {inference_time:.2f} seconds")
@@ -52,7 +55,7 @@ def run_benchmark(image_path="test_images_PANO/sample1.png"):
     
     print("="*50)
     print("Benchmark Complete.")
-    print(f"Modules executed: {list(result_json.get('modules', {}).keys())}")
+    print(f"Modules executed: {list(result_json.get('module_execution', {}).keys())}")
     print("="*50)
 
 if __name__ == "__main__":

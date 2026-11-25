@@ -1,4 +1,4 @@
-![Status](https://img.shields.io/badge/Status-v1.1%20Release-brightgreen "Status") ![Python](https://img.shields.io/badge/Python-3.12%2B-blue "Python") ![Backend](https://img.shields.io/badge/Backend-FastAPI%20%2F%20YOLOv8%20%2F%20ONNX-red "Backend") ![UI](https://img.shields.io/badge/UI-Streamlit%20%2F%20React%20Gateway-orange "UI") ![License](https://img.shields.io/badge/License-MIT-green "License") ![CI/CD Pipeline](https://img.shields.io/badge/CI%2FCD%20Pipeline-passing-brightgreen?logo=github "CI/CD Pipeline")
+![Status](https://img.shields.io/badge/Status-v1.1%20Release-brightgreen "Status") ![Python](https://img.shields.io/badge/Python-3.11%2B-blue "Python") ![Backend](https://img.shields.io/badge/Backend-FastAPI%20%2F%20YOLOv8%20%2F%20ONNX-red "Backend") ![UI](https://img.shields.io/badge/UI-Streamlit%20%2F%20React%20Gateway-orange "UI") ![License](https://img.shields.io/badge/License-MIT-green "License") ![CI/CD Pipeline](https://img.shields.io/badge/CI%2FCD%20Pipeline-passing-brightgreen?logo=github "CI/CD Pipeline")
 
 # Dental_Panoramic_Reader: Integrated Panoramic AI Diagnostic Gateway & Orchestrator (파노라마 통합 진단 파이프라인 및 게이트웨이)
 
@@ -11,7 +11,7 @@
   - Training Env (메인 워크스테이션): AMD Ryzen 9 9900X, NVIDIA GeForce RTX 5080 (16GB VRAM), 64GB RAM
 - [E2E 추론 벤치마크 및 메모리 관리]:
   - Inference Latency: 파노라마 1장당 약 `2.5 seconds` (E2E 전체 파이프라인)
-  - VRAM Peak: `core/model_manager.py`의 동적 모델 로드·언로드(Dynamic Load & Unload) 기법으로 8개 진단 모듈 구동 시 최대 `~6.5GB VRAM` 이하 유지
+  - VRAM Peak: `core/model_manager.py`의 동적 모델 로드·언로드(Dynamic Load & Unload) 기법으로 9개 진단 모듈(선택적 `Dental_004` 포함 10개) 구동 시 최대 `~6.5GB VRAM` 이하 유지
 
 ---
 
@@ -63,7 +63,7 @@ graph TD
     class OutputReport output;
 ```
 
-### 2. 각 서브모듈(Submodule)별 상세 역할 (`8/8 ONLINE`)
+### 2. 각 서브모듈(Submodule)별 상세 역할 (`9개 진단 모듈 + 선택적 Dental_004`)
 1. [`ModelManager` (`core/model_manager.py`)]: `Dental_Core`의 `get_device()` 및 `get_onnx_providers()`와 연동하여 VRAM 초과를 방지하기 위해 각 서브모듈 가중치를 추론 시점에만 동적으로 GPU에 로드하고 완료 즉시 언로드합니다.
 2. [`Dental_004` (Super Resolution — 선택적 전처리)]: 저선량·저화질 파노라마 입력 시 `SwinIR-Lightweight` 타일링 복원으로 대비·노이즈를 개선합니다.
 3. [`Dental_008` (Tooth Segmentation & Deciduous Classification — 코어)]:
@@ -75,7 +75,7 @@ graph TD
 7. [`Dental_013` (Restoration & Prosthesis Classification)]: 31-Class `YOLOv8-seg` ONNX 모델(`best_restoration_model.onnx`)을 통해 수복물을 검출하고 4대 임상 범주(`Crown/Bridge`, `Implant`, `Inlay/Onlay`, `Endodontic (RCT)`) 및 FDI 치아 번호에 매핑합니다.
 8. [`Dental_009` (Impacted Third Molar Analysis)]: 제3대구치와 인접 제2대구치 컨투어 PCA 장축 각도(Winter's Classification) 및 맹출 깊이(Pell & Gregory Level A/B/C)를 분석합니다.
 9. [`Dental_010` (Missing & Supernumerary Tooth Detection)]: 최소 치아 수 가드(`< 8`), 동적 정중선 추정, 인접치 갭 비율 휴리스틱(`gap_ratio >= 1.55`)으로 결손치를 판별합니다.
-10. [`Dental_011` (Dental Age Estimation)]: `ResNet-50` 회귀 모델(`age_resnet50.onnx`)로 치아 연령(`findings.ageEstimation`)을 추정합니다.
+10. [`Dental_011` (Dental Age Estimation)]: `ResNet-50` 하이브리드 회귀 모델(`best_hybrid_age_model.onnx`, `weights_manifest.yaml` 기준)로 치아 연령(`findings.ageEstimation`)을 추정합니다.
 11. [`Dental_014` (Osteoporosis Screening)]: `OsteoMAENet`(`best.pt`)과 하악 피질골 형태학적 특징(`morphology_features`) 융합을 통해 골다공증 위험도(`C1/C2/C3`)를 스크리닝합니다.
 12. [치주 위험도 평가 및 누락 데이터 경고 게이트 (`core/periodontal_risk_gate.py`)]: `POST /api/v1/infer`에서 선택적 임상 메타데이터(`clinical_metadata`: `psiScore`, `bopPercent`, `plaqueIndex`, `smokingStatus`, `diabetesStatus`, `hba1cPercent`, `ageYears`)를 지원합니다. 파노라마 단독 입력 등 필수 임상 지표가 누락된 경우 확정 위험도·등급 판정을 보류(`INCOMPLETE_CLINICAL_DATA`)하고 누락 항목을 명시적으로 경고하며, 치은연하 치석·탐침 깊이 등 방사선 불가 항목의 환각을 차단합니다.
 13. [`Dental_015` HiTL 오답 교정 저장·조회 API]: `POST /api/v1/hitl/save` 및 `GET /api/v1/hitl/{document_id}`를 통해 `Dental_Core` `dental_core.panorama_hitl.v1` 스키마 검증 후 Golden JSON을 저장·조회합니다.
@@ -111,13 +111,21 @@ pip install -r requirements.txt
 python setup_env.py
 ```
 
-### 2. 애플리케이션 실행 (FastAPI 게이트웨이 및 Streamlit 워크벤치)
+### 2. 애플리케이션 실행 (FastAPI 게이트웨이, Docker/HF Space 및 테스트)
 ```bash
-# FastAPI Gateway (Dental_015 프론트엔드 연동, 기본 바인딩 127.0.0.1:8000)
+# FastAPI Gateway (로컬 기본 포트 API_PORT=8000, Docker/HF Space 환경은 PORT=7860)
 uvicorn api_server:app --host 127.0.0.1 --port 8000
+
+# CPU 전용 배포 환경 의존성 및 가중치 자동 다운로드 엔트리포인트
+pip install -r requirements-cpu.txt
+# weights_manifest.yaml 기반 컨테이너 시작: docker_entrypoint.sh (PORT=7860)
 
 # Streamlit 통합 워크벤치 (로컬 127.0.0.1 바인딩 래퍼 또는 전용 포트 8500)
 python run.py
+
+# 로컬 단위 테스트 실행
+pytest tests -v
+```
 # 또는
 streamlit run app.py --server.port 8500
 ```
